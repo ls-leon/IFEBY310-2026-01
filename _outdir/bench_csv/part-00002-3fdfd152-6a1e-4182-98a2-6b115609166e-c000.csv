@@ -1,0 +1,12 @@
+filename,title,author,courant,n_chars,n_words,n_sentences,n_syllables,ttr,avg_word_len
+hugo_ndp.txt,Notre-Dame de Paris,Hugo,Romantisme,1045974,172334,11905,298195,0.1727401441387074,5.041988232153841
+hugo_qvt.txt,Quatrevingt-Treize,Hugo,Romantisme,686227,112912,8936,192908,0.19365523593595013,5.0387735581691935
+hugo_ldj.txt,Le Dernier Jour d'un Condamne,Hugo,Romantisme,198365,34038,2590,55407,0.22955805030552792,4.6046042347591305
+stendhal_le_rouge_et_le_noir.txt,Le Rouge et le Noir,Stendhal,Réalisme,1008081,171914,11012,288323,0.1323859604220715,4.830845655385833
+stendhal_la_chartreuse_de_parme.txt,La Chartreuse de Parme,Stendhal,Réalisme,1058410,181495,7648,306624,0.1266481170280173,4.815372324306455
+stendhal_souvenirs_d_egoisme.txt,Souvenirs d'egotisme,Stendhal,Réalisme,492478,82284,5938,135349,0.2080112780127364,4.885056633124301
+stendhal_de_l_amour.txt,De l'Amour,Stendhal,Réalisme,754091,126500,5956,213048,0.1749407114624506,4.872316205533597
+sand_lpf.txt,La Petite Fadette,Sand,Romantisme,331595,59288,2008,93448,0.15222304682229118,4.551764269329375
+sand_gabriel.txt,Gabriel,Sand,Romantisme,232617,38986,4769,64691,0.2338531780639204,4.910172882573232
+flaubert_madame_bovary.txt,Madame Bovary,Flaubert,Réalisme,683276,112446,7330,192699,0.19543603151735056,5.047222666880103
+flaubert_bouvard_et_pecuchet.txt,Bouvard et Pecuchet,Flaubert,Réalisme,545963,85831,7031,153582,0.2548496463981545,5.32237769570435

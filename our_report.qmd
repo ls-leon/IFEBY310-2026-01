@@ -1,0 +1,1553 @@
+---
+title: "Analyse Stylométrique du XIXe siècle — Technologie Big Data"
+subtitle: "Pipeline PySpark · Spark NLP · Stylométrie"
+author: "Krista Carla Sevi, Mick-Wanderly Laveus, Leon Lafosse"
+date: today
+lang: fr
+format:
+  html:
+    toc: true
+    toc-depth: 4
+    toc-title: "Sommaire"
+    code-fold: true
+    code-summary: "Voir le code"
+    self-contained: true
+    theme: cosmo
+    fig-align: center
+    math: mathjax
+jupyter: python3
+execute:
+  echo: false
+  warning: false
+  error: false
+  cache: false
+---
+
+```{python}
+#| label: setup
+#| include: false
+
+import os, re, math, time, warnings
+from pathlib import Path
+import pandas as pd
+import numpy as np
+warnings.filterwarnings("ignore")
+
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql.types import (
+    StringType, StructType, StructField,
+    LongType, DoubleType, ArrayType, IntegerType
+)
+from pyspark.sql.window import Window
+
+N_CORES = os.cpu_count() or 4
+
+spark = (
+    SparkSession.builder
+    .appName("Stylometry19C")
+    .master(f"local[{N_CORES}]")
+    .config("spark.sql.shuffle.partitions", str(N_CORES))
+    .config("spark.default.parallelism",    str(N_CORES))
+    .config("spark.sql.adaptive.enabled",                       "true")
+    .config("spark.sql.adaptive.coalescePartitions.enabled",    "true")
+    .config("spark.sql.adaptive.skewJoin.enabled",              "true")
+    .config("spark.serializer",              "org.apache.spark.serializer.KryoSerializer")
+    .config("spark.kryoserializer.buffer.max","512m")
+    .config("spark.driver.memory",  "4g")
+    .config("spark.executor.memory","4g")
+    .getOrCreate()
+)
+spark.sparkContext.setLogLevel("ERROR")
+
+DATA_DIR    = Path("DATA")
+PARQUET_DIR = Path("_outdir/parquet")
+PARQUET_DIR.mkdir(parents=True, exist_ok=True)
+
+# Palette : uniquement 2 courants (Romantisme / Réalisme)
+COLOR_COURANT = {"Romantisme": "#4C72B0", "Réalisme": "#DD8452"}
+
+COLOR_AUTHOR = {
+    "Balzac":         "#1f77b4",
+    "Hugo":           "#aec7e8",
+    "Stendhal":       "#2ca02c",
+    "Sand":           "#98df8a",
+    "Flaubert":       "#d62728",
+    "Zola":           "#ff9896",
+    "Voltaire":       "#9467bd",
+    "Chateaubriand":  "#8c564b",
+    "Gautier":        "#e377c2",
+}
+```
+
+```{python}
+#| label: metadata-and-etl
+#| include: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Classifications corrigées :
+#
+#  ROMANTISME : Hugo, Sand, Chateaubriand, Gautier, Voltaire
+#  RÉALISME   : Balzac, Stendhal, Flaubert, Zola
+#
+#  Sources :
+#    - Balzac  → github dh-trier/balzac  (plain text, pas d'en-tête Gutenberg)
+#    - Autres  → Project Gutenberg       (avec balises *** START OF... ***)
+# ─────────────────────────────────────────────────────────────────────────────
+
+METADATA = {
+    # ── Balzac (Réalisme) ────────────────────────────────────────────────────
+    "Adieu.txt":                   ("Adieu",                           "Balzac", "Réalisme"),
+    "Albert-Savarus.txt":          ("Albert Savarus",                  "Balzac", "Réalisme"),
+    "Autre-etude-de-femme.txt":    ("Autre étude de femme",            "Balzac", "Réalisme"),
+    "Avant-propos.txt":            ("Avant-propos — Comédie humaine",  "Balzac", "Réalisme"),
+    "Beatrix.txt":                 ("Béatrix",                         "Balzac", "Réalisme"),
+    "Cesar-Birotteau.txt":         ("César Birotteau",                 "Balzac", "Réalisme"),
+    "Combien-l_amour-revient.txt": ("A combien l'amour revient",       "Balzac", "Réalisme"),
+    "Deux-jeunes-mariees.txt":     ("Memoires de deux jeunes mariees", "Balzac", "Réalisme"),
+    "El-verdugo.txt":              ("El Verdugo",                      "Balzac", "Réalisme"),
+    # Nouveaux textes Balzac (github)
+    "Esquisse-d_homme-d_affaires.txt": ("Esquisse d'homme d'affaires", "Balzac", "Réalisme"),
+    "Esther-heureuse.txt":             ("Esther heureuse",             "Balzac", "Réalisme"),
+    "Etude-de-femme.txt":              ("Etude de femme",              "Balzac", "Réalisme"),
+    "Eugenie-Grandet.txt":             ("Eugenie Grandet",             "Balzac", "Réalisme"),
+    "Eve-et-David.txt":                ("Eve et David",                "Balzac", "Réalisme"),
+    "Facino-Cane.txt":                 ("Facino Cane",                 "Balzac", "Réalisme"),
+    "Ferragus.txt":                    ("Ferragus",                    "Balzac", "Réalisme"),
+    "Gambara.txt":                     ("Gambara",                     "Balzac", "Réalisme"),
+    "Gaudissart-II.txt":               ("Gaudissart II",               "Balzac", "Réalisme"),
+    "Gobseck.txt":                     ("Gobseck",                     "Balzac", "Réalisme"),
+    "Honorine.txt":                    ("Honorine",                    "Balzac", "Réalisme"),
+    "Jesus-Christ-en-Flandre.txt":     ("Jesus-Christ en Flandre",    "Balzac", "Réalisme"),
+    "La-bourse.txt":                   ("La Bourse",                   "Balzac", "Réalisme"),
+    "La-cousine-Bette.txt":            ("La Cousine Bette",            "Balzac", "Réalisme"),
+    # ── Hugo (Romantisme) ────────────────────────────────────────────────────
+    "hugo_ndp.txt":                ("Notre-Dame de Paris",             "Hugo",   "Romantisme"),
+    "hugo_qvt.txt":                ("Quatrevingt-Treize",              "Hugo",   "Romantisme"),
+    "hugo_ldj.txt":                ("Le Dernier Jour d'un Condamne",   "Hugo",   "Romantisme"),
+    # ── Stendhal (Réalisme) ──────────────────────────────────────────────────
+    "stendhal_le_rouge_et_le_noir.txt":    ("Le Rouge et le Noir",       "Stendhal", "Réalisme"),
+    "stendhal_la_chartreuse_de_parme.txt": ("La Chartreuse de Parme",    "Stendhal", "Réalisme"),
+    "stendhal_souvenirs_d_egoisme.txt":    ("Souvenirs d'egotisme",      "Stendhal", "Réalisme"),
+    "stendhal_de_l_amour.txt":             ("De l'Amour",                "Stendhal", "Réalisme"),
+    # ── Sand (Romantisme) ────────────────────────────────────────────────────
+    "sand_lpf.txt":                ("La Petite Fadette",               "Sand",   "Romantisme"),
+    "sand_gabriel.txt":            ("Gabriel",                         "Sand",   "Romantisme"),
+    # ── Flaubert (Réalisme) ──────────────────────────────────────────────────
+    "flaubert_madame_bovary.txt":       ("Madame Bovary",        "Flaubert", "Réalisme"),
+    "flaubert_bouvard_et_pecuchet.txt": ("Bouvard et Pecuchet",  "Flaubert", "Réalisme"),
+    "flaubert_trois_contes.txt":        ("Trois Contes",          "Flaubert", "Réalisme"),
+    "flaubert_un_coeur_simple.txt":     ("Un Coeur simple",       "Flaubert", "Réalisme"),
+    # ── Zola (Réalisme) ──────────────────────────────────────────────────────
+    "Zola_germinal.txt":           ("Germinal",                       "Zola",   "Réalisme"),
+    "Zola_l_assomoir.txt":         ("L'Assommoir",                    "Zola",   "Réalisme"),
+    "Zola_lourdes.txt":            ("Lourdes",                        "Zola",   "Réalisme"),
+    # ── Voltaire (Romantisme — référence) ────────────────────────────────────
+    "Maupassant_candide.txt":      ("Candide",                        "Voltaire", "Romantisme"),
+    # ── Chateaubriand (Romantisme) ────────────────────────────────────────────
+    "chateaubriand_vie_de_rance.txt": ("Vie de Rance",               "Chateaubriand", "Romantisme"),
+    # ── Gautier (Romantisme) ─────────────────────────────────────────────────
+    "gautier_clarimonde.txt":      ("La Morte amoureuse (Clarimonde)", "Gautier", "Romantisme"),
+    "gautier_emau.txt":            ("Emaux et Camees",                 "Gautier", "Romantisme"),
+    "gautier_menagerie_intime.txt":("Menagerie intime",                "Gautier", "Romantisme"),
+    "gautier_sacountala.txt":      ("Sacountala",                      "Gautier", "Romantisme"),
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Nettoyage Gutenberg
+# ─────────────────────────────────────────────────────────────────────────────
+START_PAT = re.compile(r"\*{3}\s*START OF[^\*]*\*{3}", re.IGNORECASE)
+END_PAT   = re.compile(r"\*{3}\s*END OF[^\*]*\*{3}",   re.IGNORECASE)
+ORNAMENT  = re.compile(r"^\s*[\*\-\=]{3,}\s*$", re.MULTILINE)
+ROMAN_CH  = re.compile(
+    r"^\s*(M{0,3})(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})\s*\.?\s*$",
+    re.IGNORECASE | re.MULTILINE
+)
+
+def clean_text(text: str) -> str:
+    m = START_PAT.search(text)
+    if m:
+        text = text[m.end():]
+    m = END_PAT.search(text)
+    if m:
+        text = text[:m.start()]
+    text = ORNAMENT.sub("", text)
+    text = ROMAN_CH.sub("", text)
+    return text.strip()
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Chargement du corpus
+#  Priorité : DATA/ en premier, puis /mnt/user-data/uploads/ pour les nouveaux
+# ─────────────────────────────────────────────────────────────────────────────
+UPLOAD_DIR = Path("/mnt/user-data/uploads")
+
+records = []
+for fname, (title, author, courant) in METADATA.items():
+    # Chercher d'abord dans DATA/, puis dans le répertoire d'uploads
+    candidates = [DATA_DIR / fname, UPLOAD_DIR / fname]
+    path = next((p for p in candidates if p.exists()), None)
+    if path is None:
+        continue
+    raw     = path.read_text(encoding="utf-8", errors="replace")
+    cleaned = clean_text(raw)
+    records.append((fname, title, author, courant, cleaned))
+
+schema = StructType([
+    StructField("filename", StringType(), False),
+    StructField("title",    StringType(), False),
+    StructField("author",   StringType(), False),
+    StructField("courant",  StringType(), False),
+    StructField("text",     StringType(), False),
+])
+
+corpus_sdf = spark.createDataFrame(records, schema=schema)
+corpus_sdf.cache()
+N_DOCS = corpus_sdf.count()
+
+meta_rows   = [(f, t, a, c) for f,(t,a,c) in METADATA.items()]
+meta_schema = StructType([
+    StructField("filename", StringType()),
+    StructField("title",    StringType()),
+    StructField("author",   StringType()),
+    StructField("courant",  StringType()),
+])
+df_meta = spark.createDataFrame(meta_rows, meta_schema)
+```
+
+```{python}
+#| label: stats-base
+#| include: false
+
+syllable_udf = F.udf(
+    lambda t: int(sum(
+        len(re.findall(r'[aeiouyàâäéèêëîïôöùûüœ]+', w, re.I))
+        for w in (t or "").split()
+    )), LongType()
+)
+
+type_token_udf = F.udf(
+    lambda t: float(len(set((t or "").lower().split())) /
+               max(len((t or "").split()), 1)), DoubleType()
+)
+
+avg_word_len_udf = F.udf(
+    lambda t: float(np.mean([len(w) for w in (t or "").split()])
+                    if (t or "").split() else 0.0),
+    DoubleType()
+)
+
+stats_sdf = (
+    corpus_sdf
+    .withColumn("n_chars",     F.length("text"))
+    .withColumn("n_words",     F.size(F.split("text", r"\s+")))
+    .withColumn("n_sentences", F.size(F.split("text", r"[.!?]+")))
+    .withColumn("n_syllables", syllable_udf("text"))
+    .withColumn("ttr",         type_token_udf("text"))
+    .withColumn("avg_word_len",avg_word_len_udf("text"))
+    .drop("text")
+)
+stats_sdf.cache()
+
+@F.udf(DoubleType())
+def udf_fk(nw, ns, nsyl):
+    if not nw or not ns or nw == 0 or ns == 0:
+        return 0.0
+    return round(206.835 - 1.015*(nw/ns) - 84.6*(nsyl/nw), 3)
+
+@F.udf(DoubleType())
+def udf_km(nw, ns, nsyl):
+    if not nw or not ns or nw == 0 or ns == 0:
+        return 0.0
+    return round(209.835 - 2.048*(nw/ns) - 64.3*(nsyl/nw), 3)
+
+read_sdf = (
+    stats_sdf
+    .withColumn("fk", udf_fk("n_words","n_sentences","n_syllables"))
+    .withColumn("km", udf_km("n_words","n_sentences","n_syllables"))
+)
+read_sdf.cache()
+read_pd = read_sdf.toPandas()
+```
+
+```{python}
+#| label: word-frequencies
+#| include: false
+
+STOPWORDS_FR = {
+    "le","la","les","de","du","des","un","une","et","en","a","au","aux",
+    "il","elle","ils","elles","je","tu","nous","vous","on","se","sa","son","ses",
+    "que","qui","qu","ne","pas","plus","par","sur","dans","avec","est","etait",
+    "pour","mais","ou","donc","or","ni","car","ce","cet","cette","ces","mon",
+    "ma","mes","ton","ta","tes","lui","leur","leurs","y","si","comme","bien",
+    "tout","tous","meme","tres","aussi","toute","toutes","etre","avoir","fait",
+    "dit","peut","dont","quel","quelle","quels","quelles","d",
+    "l","j","m","n","s","c"
+}
+
+words_sdf = (
+    corpus_sdf
+    .select("filename","title","author","courant",
+            F.explode(
+                F.split(F.lower(F.regexp_replace("text", r"[^\w\s]", " ")), r"\s+")
+            ).alias("word"))
+    .filter(F.length("word") > 2)
+    .filter(~F.col("word").isin(STOPWORDS_FR))
+    .groupBy("filename","title","author","courant","word")
+    .agg(F.count("*").alias("freq"))
+)
+words_sdf.cache()
+
+w_spec = Window.partitionBy("filename").orderBy(F.desc("freq"))
+ranked_sdf = (
+    words_sdf
+    .withColumn("rank",     F.rank().over(w_spec))
+    .withColumn("log_rank", F.log10("rank"))
+    .withColumn("log_freq", F.log10(F.col("freq") + 1))
+)
+ranked_sdf.cache()
+
+zipf_pd = ranked_sdf.filter(F.col("rank") <= 200).toPandas()
+zipf_pd["log_rank"] = np.log10(zipf_pd["rank"])
+zipf_pd["log_freq"] = np.log10(zipf_pd["freq"] + 1)
+```
+
+```{python}
+#| label: dialog-segmentation
+#| include: false
+
+dialog_udf    = F.udf(lambda t: sum(1 for l in (t or "").split('\n')
+                                    if re.match(r'^\s*[«"—–\-]', l)), LongType())
+narration_udf = F.udf(lambda t: sum(1 for l in (t or "").split('\n')
+                                    if l.strip() and not re.match(r'^\s*[«"—–\-]', l)), LongType())
+
+seg_sdf = (
+    corpus_sdf
+    .withColumn("dialog_lines",    dialog_udf("text"))
+    .withColumn("narration_lines", narration_udf("text"))
+    .select("title","author","courant","dialog_lines","narration_lines")
+)
+seg_sdf.cache()
+seg_pd = seg_sdf.toPandas()
+seg_pd["total"]      = seg_pd["dialog_lines"] + seg_pd["narration_lines"]
+seg_pd["pct_dialog"] = (seg_pd["dialog_lines"] / seg_pd["total"].replace(0, 1) * 100).round(1)
+```
+
+```{python}
+#| label: sliding-windows
+#| include: false
+
+VOWELS = re.compile(r'[aeiouyàâäéèêëîïôöùûüœ]+', re.I)
+
+def sliding_fk(text, window=500, step=250):
+    words = text.split()
+    out = []
+    for i in range(0, len(words) - window, step):
+        chunk = words[i:i+window]
+        n_s   = max(1, sum(1 for w in chunk if re.search(r'[.!?]$', w)))
+        n_syl = sum(len(VOWELS.findall(w)) for w in chunk)
+        asl   = window / n_s
+        asw   = n_syl  / window
+        fk    = round(206.835 - 1.015*asl - 84.6*asw, 2)
+        km    = round(209.835 - 2.048*asl - 64.3*asw, 2)
+        out.append((i, fk, km))
+    return out
+
+sliding_schema = ArrayType(StructType([
+    StructField("pos", LongType()),
+    StructField("fk",  DoubleType()),
+    StructField("km",  DoubleType()),
+]))
+sliding_udf = F.udf(lambda t: sliding_fk(t, 500, 250) if t else [], sliding_schema)
+
+sliding_sdf = (
+    corpus_sdf
+    .filter(F.size(F.split("text", r"\s+")) > 40000)
+    .select("title","author","courant", sliding_udf("text").alias("wins"))
+    .select("title","author","courant", F.explode("wins").alias("w"))
+    .select("title","author","courant",
+            F.col("w.pos").alias("pos"),
+            F.col("w.fk").alias("fk"),
+            F.col("w.km").alias("km"))
+)
+sliding_sdf.cache()
+sliding_pd = sliding_sdf.toPandas()
+```
+
+```{python}
+#| label: zipf-regression
+#| include: false
+
+from scipy import stats as scipy_stats
+
+reg_rows = []
+for (fname, author, courant, title), grp in zipf_pd.groupby(["filename","author","courant","title"]):
+    if len(grp) < 10:
+        continue
+    slope, intercept, r, p, se = scipy_stats.linregress(grp["log_rank"], grp["log_freq"])
+    reg_rows.append({
+        "title":title,"author":author,"courant":courant,
+        "slope":round(slope,3),"intercept":round(intercept,3),"r2":round(r**2,3)
+    })
+reg_df = pd.DataFrame(reg_rows)
+```
+
+---
+
+# 1 — Description des données et pipeline d'extraction
+
+## 1.1 Présentation des textes
+
+Pour ce projet, on travaille sur des romans et nouvelles du XIXe siècle, stockés sous forme de fichiers `.txt` dans un dossier `DATA/`. Les textes de Balzac viennent d'un dépôt GitHub ([dh-trier/balzac](https://github.com/dh-trier/balzac/tree/master)) — ce sont de simples fichiers texte, sans en-tête particulier. Pour tous les autres auteurs, les fichiers ont été récupérés sur le Project Gutenberg, ce qui implique la présence de balises `*** START OF... ***` qu'il faut retirer avant de travailler sur le texte.
+
+Au total, on dispose de **`{python} N_DOCS` œuvres**, réparties entre deux courants littéraires :
+
+- **Romantisme** : Hugo, Sand, Chateaubriand, Gautier, Voltaire
+- **Réalisme** : Balzac, Stendhal, Flaubert, Zola
+
+## 1.2 Tableau récapitulatif
+
+```{python}
+#| echo: false
+
+tbl = read_pd[["title","author","courant","n_words","n_sentences"]].copy()
+tbl.columns = ["Titre","Auteur","Courant","Mots","Phrases"]
+tbl = tbl.sort_values(["Courant","Auteur","Titre"])
+tbl["Mots"]    = tbl["Mots"].apply(lambda x: f"{x:,}")
+tbl["Phrases"] = tbl["Phrases"].apply(lambda x: f"{x:,}")
+tbl.style\
+    .set_properties(**{"text-align":"left"})\
+    .set_table_styles([{"selector":"th","props":[("text-align","left")]}])\
+    .hide(axis="index")
+```
+
+## 1.3 Pipeline d'extraction (ETL)
+
+```{python}
+#| echo: true
+#| eval: false
+#| code-fold: false
+
+# Extrait illustratif — voir appendice pour le pipeline complet
+
+START_PAT = re.compile(r"\*{3}\s*START OF[^\*]*\*{3}", re.IGNORECASE)
+END_PAT   = re.compile(r"\*{3}\s*END OF[^\*]*\*{3}",   re.IGNORECASE)
+
+def clean_text(text: str) -> str:
+    """Supprime en-têtes/pieds Gutenberg, séparateurs ornementaux,
+    numéros de chapitres en chiffres romains."""
+    m = START_PAT.search(text)
+    if m: text = text[m.end():]
+    m = END_PAT.search(text)
+    if m: text = text[:m.start()]
+    text = re.sub(r"^\s*[\*\-\=]{3,}\s*$", "", text, flags=re.MULTILINE)
+    return text.strip()
+```
+
+La fonction `clean_text()` s'occupe de nettoyer les fichiers des deux sources : elle retire les en-têtes et pieds de page Gutenberg quand ils sont présents, supprime les séparateurs ornementaux (`* * *`) et les lignes ne contenant que des chiffres romains (numéros de chapitres). Pour les fichiers Balzac sans en-tête, elle ne fait rien de particulier — ce qui est exactement ce qu'on veut. Par ailleurs, le chargement cherche d'abord dans `DATA/`, puis dans le dossier d'uploads, de sorte qu'on peut ajouter de nouveaux fichiers sans toucher au code.
+
+---
+
+# 2 — Chargement et Transformation
+
+Une fois les fichiers chargés et nettoyés, on passe au traitement via PySpark. Chaque texte devient une ligne dans un DataFrame Spark, et on enchaîne plusieurs transformations : calcul de statistiques de base sur le texte, mesures de richesse lexicale, et segmentation entre les passages de dialogue et de narration.
+
+## 2.1 Statistiques descriptives sur les textes
+
+```{python}
+#| label: fig-corpus-overview
+#| fig-cap: "Taille du corpus (nombre de mots) par oeuvre, coloré par courant littéraire."
+
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+fig = px.bar(
+    read_pd.sort_values("n_words", ascending=True),
+    x="n_words", y="title", color="courant",
+    color_discrete_map=COLOR_COURANT,
+    orientation="h",
+    title="Taille des oeuvres du corpus (nombre de mots)",
+    labels={"n_words":"Nombre de mots","title":"Oeuvre","courant":"Courant"},
+    template="plotly_white",
+    height=max(500, 20 * len(read_pd)),
+)
+fig.update_layout(
+    xaxis_tickformat=",",
+    legend_title="Courant littéraire",
+    margin=dict(l=300),
+    font=dict(size=11),
+)
+fig.show()
+```
+
+```{python}
+#| label: fig-corpus-summary
+#| fig-cap: "Distribution du nombre de mots et de phrases par courant (boîtes à moustaches)."
+
+fig = make_subplots(rows=1, cols=2,
+    subplot_titles=["Nombre de mots","Nombre de phrases"])
+
+for courant, color in COLOR_COURANT.items():
+    sub = read_pd[read_pd["courant"] == courant]
+    fig.add_trace(go.Box(y=sub["n_words"], name=courant,
+        marker_color=color, boxmean=True, showlegend=True), row=1, col=1)
+    fig.add_trace(go.Box(y=sub["n_sentences"], name=courant,
+        marker_color=color, boxmean=True, showlegend=False), row=1, col=2)
+
+fig.update_layout(
+    title="Distribution corpus : mots et phrases par courant",
+    template="plotly_white", height=420,
+    legend_title="Courant",
+)
+fig.show()
+```
+
+## 2.2 Richesse lexicale — Type-Token Ratio et longueur moyenne des mots
+
+Le **Type-Token Ratio (TTR)** est une façon simple de mesurer la variété du vocabulaire d'un texte : on divise le nombre de mots distincts par le nombre total de mots. Plus le ratio est élevé, moins l'auteur se répète.
+
+```{python}
+#| label: fig-ttr
+#| fig-cap: "TTR et longueur moyenne des mots par auteur. Un TTR élevé indique un vocabulaire riche ; une longueur moyenne élevée suggère un style soutenu."
+
+fig = px.scatter(
+    read_pd,
+    x="ttr", y="avg_word_len",
+    color="courant", symbol="author",
+    text="author",
+    size="n_words",
+    color_discrete_map=COLOR_COURANT,
+    title="Richesse lexicale : TTR vs longueur moyenne des mots",
+    labels={
+        "ttr":          "Type-Token Ratio",
+        "avg_word_len": "Longueur moyenne des mots (car.)",
+        "courant":      "Courant",
+        "author":       "Auteur",
+        "n_words":      "Nb de mots",
+    },
+    template="plotly_white",
+    height=500,
+)
+fig.update_traces(textposition="top center", marker_line_width=1)
+fig.update_layout(
+    legend_title="Courant / Auteur",
+    font=dict(size=11),
+)
+fig.show()
+```
+
+## 2.3 Segmentation dialogue / narration
+
+Avant d'annoter les textes, on cherche à distinguer les passages de dialogue des passages narratifs dans chaque œuvre. La règle retenue est simple : une ligne qui commence par un tiret cadratin (—) ou des guillemets est considérée comme du dialogue ; tout le reste est de la narration.
+
+```{python}
+#| label: fig-dialog-pct
+#| fig-cap: "Pourcentage de dialogue par auteur (médiane sur ses oeuvres du corpus)."
+
+dial_author = (
+    seg_pd.groupby(["author","courant"])["pct_dialog"]
+    .median().reset_index()
+    .sort_values("pct_dialog", ascending=False)
+)
+
+fig = px.bar(
+    dial_author, x="author", y="pct_dialog",
+    color="courant", color_discrete_map=COLOR_COURANT,
+    title="Pourcentage de dialogue médian par auteur",
+    labels={"pct_dialog":"% de dialogue","author":"Auteur","courant":"Courant"},
+    text_auto=".1f",
+    template="plotly_white",
+    height=420,
+)
+fig.update_layout(
+    legend_title="Courant",
+    font=dict(size=11),
+    xaxis_title="Auteur",
+    yaxis_title="% de dialogue",
+)
+fig.show()
+```
+
+```{python}
+#| label: fig-dialog-detail
+#| fig-cap: "Dialogue vs Narration par oeuvre, trié par pourcentage de dialogue décroissant."
+
+seg_sorted = seg_pd.sort_values("pct_dialog", ascending=False).head(30)
+
+fig = px.bar(
+    seg_sorted,
+    x="title",
+    y=["dialog_lines","narration_lines"],
+    barmode="stack",
+    title="Dialogue vs Narration — 30 oeuvres avec le plus de dialogue",
+    labels={"value":"Lignes","title":"Oeuvre","variable":"Type"},
+    template="plotly_white",
+    height=480,
+    color_discrete_map={
+        "dialog_lines":    "#5B8DB8",
+        "narration_lines": "#E8A87C",
+    },
+)
+fig.update_xaxes(tickangle=-45, tickfont_size=9)
+# Renommer la légende proprement
+newnames = {"dialog_lines": "Dialogue", "narration_lines": "Narration"}
+fig.for_each_trace(lambda t: t.update(name=newnames.get(t.name, t.name)))
+fig.update_layout(
+    legend_title="Type de segment",
+    font=dict(size=11),
+)
+fig.show()
+```
+
+---
+
+# 3 — Pipelines d'annotation (Spark NLP)
+
+Une fois les textes nettoyés et segmentés, on peut les annoter. Comme l'objectif est avant tout de faire de la stylométrie, on ne va pas jusqu'à la lemmatisation ou l'étiquetage grammatical, on s'arrête à la tokenisation. Le pipeline enchaîne cinq étapes :
+
+| Etape | Annotateur | Rôle |
+|---|---|---|
+| 1 | `DocumentAssembler` | Mise en forme du texte brut |
+| 2 | `SentenceDetector` | Découpage en phrases |
+| 3 | `Tokenizer` | Tokens avec gestion des apostrophes et tirets |
+| 4 | `Normalizer` | Suppression des caractères non-alphabétiques |
+| 5 | `Normalizer` | Mise en minuscules |
+
+Une fois les annotations produites, le DataFrame est sauvegardé en **Parquet** pour la suite des traitements.
+
+```{python}
+#| label: sparknlp-pipeline
+#| echo: true
+#| eval: false
+#| code-fold: false
+
+# Pipeline Spark NLP (nécessite spark-nlp installé)
+import sparknlp
+from sparknlp.base       import DocumentAssembler
+from sparknlp.annotator  import SentenceDetector, Tokenizer, Normalizer
+from pyspark.ml          import Pipeline
+
+document  = DocumentAssembler().setInputCol("text").setOutputCol("document")
+sentence  = SentenceDetector().setInputCols(["document"]).setOutputCol("sentences")
+tokenizer = Tokenizer().setInputCols(["sentences"]).setOutputCol("token")
+normalizer = (Normalizer()
+    .setInputCols(["token"]).setOutputCol("normalized")
+    .setLowercase(True)
+    .setCleanupPatterns([r"[^\w]"]))
+
+nlp_pipeline = Pipeline(stages=[document, sentence, tokenizer, normalizer])
+
+# Annotation parallèle par roman
+annotated = (
+    nlp_pipeline.fit(corpus_sdf.repartition(N_CORES, "filename"))
+    .transform(corpus_sdf)
+)
+```
+
+L'annotation se fait **en parallèle, roman par roman**, grâce à un `repartition("filename")` avant de lancer le pipeline.
+
+---
+
+# 4 — Analyse Stylométrique
+
+## 4.1 Loi de Zipf
+
+On commence l'analyse stylométrique par la loi de Zipf. L'idée est double : d'abord vérifier que nos textes se comportent comme des textes naturels (ce qui est généralement le cas pour la langue écrite), ensuite comparer les paramètres de cette loi d'un auteur à l'autre pour voir si on peut dégager des tendances stylistiques.
+
+La loi de Zipf dit que la fréquence $\f$ d'un mot de rang $\r$ suit :
+
+$$
+f = \frac{C}{r^{s}}
+$$
+
+où $C$ et $s$ sont des paramètres à estimer. Pour que la relation soit plus facile à visualiser sous forme de droite, on passe au logarithme (base 10). En posant $K = \log(C)$, on obtient :
+
+$$
+\log(f) = K - s \cdot \log(r)
+$$
+
+On trace donc $\log(f)$ en fonction de $\log(r)$, et on s'attend à obtenir une droite de pente $-s$ proche de $-1$ pour un texte en langue naturelle.
+
+### 4.1.1 Zipf plots par courant
+
+```{python}
+#| label: fig-zipf-courant
+#| fig-cap: "Loi de Zipf (log-log) — Top-200 mots par roman. Une droite parfaite confirme la loi de Zipf."
+
+fig = make_subplots(rows=1, cols=2,
+    subplot_titles=["Romantisme","Réalisme"],
+    shared_yaxes=True)
+
+for col_idx, courant in enumerate(["Romantisme","Réalisme"], start=1):
+    sub = zipf_pd[zipf_pd["courant"] == courant]
+    seen = set()
+    for title, grp in sub.groupby("title"):
+        author = grp["author"].iloc[0]
+        show = author not in seen
+        seen.add(author)
+        fig.add_trace(
+            go.Scatter(
+                x=grp["log_rank"], y=grp["log_freq"],
+                mode="lines", name=author if show else title,
+                line=dict(width=1, color=COLOR_AUTHOR.get(author,"#888")),
+                opacity=0.6,
+                legendgroup=author,
+                showlegend=show,
+            ),
+            row=1, col=col_idx
+        )
+
+fig.update_xaxes(title_text="log10(rang)",      row=1, col=1)
+fig.update_xaxes(title_text="log10(rang)",      row=1, col=2)
+fig.update_yaxes(title_text="log10(fréquence)", row=1, col=1)
+fig.update_layout(
+    title="Loi de Zipf — comparaison Romantisme / Réalisme",
+    template="plotly_white", height=450,
+    legend_title="Auteur",
+    font=dict(size=11),
+)
+fig.show()
+```
+
+### 4.1.2 Paramètres de régression Zipf par auteur
+
+Sans surprise, $K$ varie assez largement (entre 2 et 4) d'un texte à l'autre — c'est simplement parce que les œuvres n'ont pas toutes la même taille. En revanche, $s$ reste remarquablement stable. L'erreur standard des régressions tourne autour de 0.01 ou 0.02, et le $r$ dépasse systématiquement 0.95 : les Zipf plots log-log sont bien des droites.
+
+```{python}
+#| label: fig-zipf-slope
+#| fig-cap: "Coefficient directeur alpha de la régression log-log. Un alpha proche de -1 (valeur théorique) confirme la loi de Zipf."
+
+fig = px.box(
+    reg_df, x="author", y="slope",
+    color="courant", color_discrete_map=COLOR_COURANT,
+    points="all",
+    title="Pente Zipf (alpha) par auteur",
+    labels={"slope":"Pente alpha","author":"Auteur","courant":"Courant"},
+    template="plotly_white",
+    height=430,
+)
+fig.add_hline(
+    y=-1, line_dash="dash", line_color="grey",
+    annotation_text="alpha = -1 (théorique)",
+    annotation_position="right",
+)
+fig.update_layout(
+    legend_title="Courant",
+    font=dict(size=11),
+)
+fig.show()
+```
+
+```{python}
+#| label: fig-zipf-r2
+#| fig-cap: "R2 de la régression Zipf : mesure de la linéarité log-log. Un R2 proche de 1 indique une excellente conformité à la loi."
+
+fig = px.bar(
+    reg_df.sort_values("r2"),
+    x="title", y="r2", color="courant",
+    color_discrete_map=COLOR_COURANT,
+    title="Qualité de l'ajustement Zipf (R2) par oeuvre",
+    labels={"r2":"R2","title":"Oeuvre","courant":"Courant"},
+    template="plotly_white", height=420,
+    text_auto=".3f",
+)
+fig.update_xaxes(tickangle=-40, tickfont_size=9)
+fig.update_layout(
+    legend_title="Courant",
+    font=dict(size=11),
+)
+fig.show()
+```
+
+### 4.1.3 Top-20 mots par auteur (hors stopwords)
+
+```{python}
+#| label: fig-top-words
+#| fig-cap: "20 mots les plus fréquents par auteur (stopwords exclus). Ces mots révèlent les thèmes et l'univers lexical de chaque auteur."
+
+top20 = (
+    words_sdf
+    .groupBy("author","courant","word")
+    .agg(F.sum("freq").alias("total_freq"))
+    .withColumn("rk", F.rank().over(Window.partitionBy("author").orderBy(F.desc("total_freq"))))
+    .filter(F.col("rk") <= 20)
+    .toPandas()
+)
+
+authors = sorted(top20["author"].unique())
+n_auth  = len(authors)
+ncols   = 3
+nrows   = math.ceil(n_auth / ncols)
+
+fig = make_subplots(
+    rows=nrows, cols=ncols,
+    subplot_titles=authors,
+    vertical_spacing=0.08,
+    horizontal_spacing=0.08,
+)
+
+for i, author in enumerate(authors):
+    r, c = divmod(i, ncols)
+    sub  = top20[top20["author"] == author].sort_values("total_freq")
+    courant = sub["courant"].iloc[0]
+    fig.add_trace(
+        go.Bar(
+            x=sub["total_freq"], y=sub["word"],
+            orientation="h",
+            marker_color=COLOR_COURANT.get(courant,"#888"),
+            name=author, showlegend=False,
+        ),
+        row=r+1, col=c+1
+    )
+
+fig.update_layout(
+    title="Top-20 mots par auteur (stopwords exclus)",
+    template="plotly_white",
+    height=280 * nrows,
+    font=dict(size=10),
+)
+fig.show()
+```
+
+## 4.2 Indices de lisibilité : Flesch-Kincaid et Kandel-Moles
+
+On utilise deux indices pour quantifier la complexité de lecture des textes. Pour un passage donné, en notant **mots** le nombre de mots, **phrases** le nombre de phrases et **syllabes** le nombre de syllabes, les deux formules sont les suivantes :
+
+$$
+\text{FK} = 206.835 - 1.015 \cdot \left( \frac{\text{mots}}{\text{phrases}} \right) - 84.6 \cdot \left( \frac{\text{syllabes}}{\text{mots}} \right)
+$$
+
+$$
+\text{KM} = 209.835 - 2.048 \cdot \left( \frac{\text{mots}}{\text{phrases}} \right) - 64.3 \cdot \left( \frac{\text{syllabes}}{\text{mots}} \right)
+$$
+
+- **FK** : un score élevé correspond à un texte plus difficile à lire (phrases longues, mots à nombreuses syllabes).
+- **KM** : c'est l'inverse — plus le score est haut, plus le texte est facile à lire.
+
+Pour compter les syllabes, on s'appuie sur les groupes de voyelles phonétiques du français, ce qui donne une approximation suffisante pour comparer des auteurs à grande échelle.
+
+### 4.2.1 Indices globaux par oeuvre
+
+```{python}
+#| label: fig-readability-scatter
+#| fig-cap: "FK vs KM par oeuvre. Les deux indices sont quasi-linéairement liés ; leur combinaison différencie les styles."
+
+fig = px.scatter(
+    read_pd,
+    x="fk", y="km",
+    color="courant", symbol="author",
+    text="title",
+    size="n_words",
+    color_discrete_map=COLOR_COURANT,
+    title="Indices de lisibilité FK vs KM par oeuvre",
+    labels={
+        "fk":     "Flesch-Kincaid",
+        "km":     "Kandel-Moles",
+        "courant":"Courant",
+        "author": "Auteur",
+        "n_words":"Nb de mots",
+    },
+    template="plotly_white", height=520,
+)
+fig.update_traces(textposition="top center", textfont_size=8, marker_line_width=1)
+fig.update_layout(
+    legend_title="Courant / Auteur",
+    font=dict(size=11),
+)
+fig.show()
+```
+
+### 4.2.2 Comparaison par courant
+
+```{python}
+#| label: fig-readability-boxplot
+#| fig-cap: "Distribution des indices FK et KM par courant littéraire."
+
+fig = make_subplots(rows=1, cols=2,
+    subplot_titles=[
+        "Flesch-Kincaid (plus élevé = plus difficile)",
+        "Kandel-Moles (plus élevé = plus facile)",
+    ])
+
+for col_i, col_name in enumerate(["fk","km"], start=1):
+    for courant, color in COLOR_COURANT.items():
+        sub = read_pd[read_pd["courant"] == courant]
+        if sub.empty:
+            continue
+        fig.add_trace(
+            go.Box(y=sub[col_name], name=courant,
+                   marker_color=color, boxmean=True,
+                   showlegend=(col_i == 1)),
+            row=1, col=col_i
+        )
+
+fig.update_layout(
+    title="FK et KM — distribution par courant littéraire",
+    template="plotly_white", height=430,
+    legend_title="Courant",
+    font=dict(size=11),
+)
+fig.show()
+```
+
+### 4.2.3 Indices par auteur
+
+```{python}
+#| label: fig-readability-heatmap
+#| fig-cap: "Indices FK et KM moyens par auteur."
+
+heat_data = (
+    read_pd.groupby("author")[["fk","km"]]
+    .mean().round(2).reset_index()
+    .sort_values("fk")
+)
+
+fig = make_subplots(rows=1, cols=2,
+    subplot_titles=["Flesch-Kincaid moyen","Kandel-Moles moyen"])
+
+for col_i, col_name in enumerate(["fk","km"], start=1):
+    fig.add_trace(
+        go.Bar(
+            x=heat_data["author"],
+            y=heat_data[col_name],
+            text=heat_data[col_name],
+            textposition="outside",
+            marker_color=[COLOR_AUTHOR.get(a,"#888") for a in heat_data["author"]],
+            showlegend=False,
+        ),
+        row=1, col=col_i
+    )
+
+fig.update_layout(
+    title="Indices de lisibilité moyens par auteur",
+    template="plotly_white", height=420,
+    font=dict(size=11),
+)
+fig.show()
+```
+
+### 4.2.4 Indices par fenêtre glissante (FK — window=500, step=250)
+
+Dans la section précédente, on a attribué un score de lisibilité à chaque texte pris dans son ensemble. Mais un roman n'est pas homogène : certains passages sont denses et complexes, d'autres beaucoup plus légers. Pour rendre ça visible, on découpe chaque texte en fenêtres de 500 mots consécutifs, avec un pas de 250 mots, et on calcule le FK de chacune. On obtient ainsi une courbe de lisibilité tout au long du texte — les pics correspondant souvent aux dialogues, naturellement plus courts et plus vifs.
+
+```{python}
+#| label: fig-sliding-courant
+#| fig-cap: "FK sur fenêtres glissantes (500 mots, pas 250) pour les oeuvres longues (plus de 40 000 mots). Les pics correspondent souvent aux passages de dialogue."
+
+for courant in ["Romantisme","Réalisme"]:
+    sub = sliding_pd[sliding_pd["courant"] == courant]
+    if sub.empty:
+        continue
+    fig = px.line(
+        sub, x="pos", y="fk", color="title",
+        title=f"FK glissant — {courant}",
+        labels={"pos":"Position (mots)","fk":"FK","title":"Oeuvre"},
+        template="plotly_white", height=380,
+    )
+    fig.update_traces(opacity=0.75, line_width=1.2)
+    fig.update_layout(
+        legend_title="Oeuvre",
+        font=dict(size=11),
+    )
+    fig.show()
+```
+
+```{python}
+#| label: fig-sliding-stability
+#| fig-cap: "Stabilité des indices FK : écart-type du FK glissant par oeuvre. Un écart-type élevé indique de fortes variations stylistiques internes."
+
+stab = (
+    sliding_pd.groupby(["title","author","courant"])["fk"]
+    .std().reset_index()
+    .rename(columns={"fk":"fk_std"})
+    .sort_values("fk_std", ascending=False)
+)
+
+fig = px.bar(
+    stab, x="title", y="fk_std",
+    color="courant", color_discrete_map=COLOR_COURANT,
+    title="Stabilité du FK glissant — écart-type par oeuvre",
+    labels={"fk_std":"Ecart-type FK","title":"Oeuvre","courant":"Courant"},
+    text_auto=".2f",
+    template="plotly_white", height=420,
+)
+fig.update_xaxes(tickangle=-35, tickfont_size=9)
+fig.update_layout(
+    legend_title="Courant",
+    font=dict(size=11),
+)
+fig.show()
+```
+
+## 4.3 Radar stylistique par auteur
+
+Le radar permet de voir d'un coup d'œil le profil stylistique de chaque auteur sur plusieurs dimensions à la fois. Au lieu de comparer les indicateurs un par un, on les regroupe dans un graphique en toile d'araignée où chaque axe représente une caractéristique différente.
+
+**Les 5 dimensions retenues :**
+
+- **FK (difficulté de lecture)** : moyenne de l'indice Flesch-Kincaid sur l'ensemble des œuvres de l'auteur — un score élevé trahit des phrases longues et un vocabulaire chargé en syllabes.
+- **KM (facilité de lecture)** : indice de Kandel-Moles moyen — il va dans le sens inverse du FK ; plus c'est élevé, plus c'est facile à lire.
+- **Richesse du vocabulaire (TTR)** : Type-Token Ratio moyen — plus l'auteur varie son vocabulaire, plus ce score est haut.
+- **Longueur des mots** : nombre de caractères moyen par mot — un proxy du registre de langue : les textes soutenus ont tendance à utiliser des mots plus longs.
+- **Nombre de phrases moyen** : le volume de phrases dans les œuvres de l'auteur, qui reflète en partie sa façon de structurer ses textes.
+
+**Normalisation :** chaque axe est ramené entre 0 et 1 (min-max sur l'ensemble des textes) pour rendre les dimensions comparables entre elles, peu importe leurs unités. Un auteur avec un grand polygone a un style marqué sur plusieurs axes ; un polygone serré au centre indique un style proche de la moyenne générale.
+
+**Comment lire le graphique :** deux auteurs dont les polygones se superposent ont des styles proches ; plus ils sont distincts, plus leurs façons d'écrire divergent.
+
+```{python}
+#| label: fig-radar
+#| fig-cap: "Profil stylistique radar par auteur : 5 dimensions normalisées (0 a 1) permettent une comparaison visuelle globale."
+
+from plotly.colors import hex_to_rgb
+
+def normalize_col(s):
+    mn, mx = s.min(), s.max()
+    return (s - mn) / (mx - mn + 1e-9)
+
+radar_df = read_pd.groupby("author").agg(
+    fk=("fk","mean"),
+    km=("km","mean"),
+    ttr=("ttr","mean"),
+    avg_word_len=("avg_word_len","mean"),
+    n_sentences=("n_sentences","mean"),
+).reset_index()
+
+for col in ["fk","km","ttr","avg_word_len","n_sentences"]:
+    radar_df[col] = normalize_col(radar_df[col])
+
+dims   = ["fk","km","ttr","avg_word_len","n_sentences"]
+labels = [
+    "FK (difficulté)",
+    "KM (lisibilité)",
+    "Richesse vocab. (TTR)",
+    "Longueur mots",
+    "Nb phrases moyen",
+]
+
+fig = go.Figure()
+for _, row in radar_df.iterrows():
+    vals  = [row[d] for d in dims] + [row[dims[0]]]
+    lbs   = labels + [labels[0]]
+    color = COLOR_AUTHOR.get(row["author"], "#888")
+    rgb   = hex_to_rgb(color)
+    fig.add_trace(go.Scatterpolar(
+        r=vals, theta=lbs, fill="toself",
+        name=row["author"],
+        line_color=color,
+        fillcolor=f"rgba({rgb[0]},{rgb[1]},{rgb[2]},0.15)",
+    ))
+
+fig.update_layout(
+    polar=dict(radialaxis=dict(visible=True, range=[0,1])),
+    title="Profil stylistique radar par auteur (normalisé 0 a 1)",
+    template="plotly_white", height=550,
+    legend_title="Auteur",
+    font=dict(size=11),
+)
+fig.show()
+```
+
+## 4.4 Distance stylistique entre auteurs
+
+Pour aller plus loin que le radar, on calcule une distance chiffrée entre chaque paire d'auteurs. L'idée est simple : si deux auteurs ont des valeurs proches sur tous les indicateurs, leur style est similaire ; si leurs valeurs divergent sur plusieurs axes, leur style est différent.
+
+**Méthode :** on repart des quatre indicateurs — FK, KM, TTR et longueur moyenne des mots — en les standardisant d'abord avec `StandardScaler` (centrage-réduction), pour que chaque dimension pèse autant dans le calcul quelle que soit son échelle. La distance entre deux auteurs $i$ et $j$ est ensuite la **distance euclidienne** dans cet espace à 4 dimensions :
+
+$$
+d(i, j) = \sqrt{\sum_{k=1}^{4} (x_{i,k} - x_{j,k})^2}
+$$
+
+où $x_{i,k}$ est la valeur standardisée du $k$-ième indicateur pour l'auteur $i$.
+
+**Comment lire la heatmap :** la matrice est symétrique — la distance de $A$ vers $B$ est la même que de $B$ vers $A$ — et la diagonale est nulle. Les cases foncées signalent des styles proches, les cases claires des styles éloignés. On peut ainsi vérifier si les auteurs d'un même courant se regroupent vraiment, ou si les similitudes stylistiques s'affranchissent parfois des frontières entre Romantisme et Réalisme.
+
+```{python}
+#| label: fig-heatmap-distance
+#| fig-cap: "Matrice de distance euclidienne entre auteurs sur 4 indices stylistiques normalisés. Plus la couleur est foncée, plus les styles sont proches."
+
+from sklearn.preprocessing import StandardScaler
+
+style_feats = read_pd.groupby("author")[["fk","km","ttr","avg_word_len"]].mean()
+scaler = StandardScaler()
+X = scaler.fit_transform(style_feats)
+
+n = len(style_feats)
+dist_mat = np.zeros((n, n))
+for i in range(n):
+    for j in range(n):
+        dist_mat[i,j] = np.sqrt(np.sum((X[i]-X[j])**2))
+
+authors_list = list(style_feats.index)
+fig = px.imshow(
+    dist_mat,
+    x=authors_list, y=authors_list,
+    color_continuous_scale="Blues_r",
+    title="Distance stylistique entre auteurs (euclidienne, normalisée)",
+    labels={"color":"Distance"},
+    template="plotly_white",
+    height=450,
+    text_auto=".2f",
+)
+fig.update_layout(
+    font=dict(size=11),
+)
+fig.show()
+```
+
+---
+
+# 5 — Expérience Spark et Formats Big Data
+
+## 5.1 Configuration de la session Spark
+
+```{python}
+#| label: spark-config
+#| echo: true
+#| eval: false
+#| code-fold: false
+
+spark = (
+    SparkSession.builder
+    .appName("Stylometry19C")
+    .master(f"local[{N_CORES}]")
+    .config("spark.sql.shuffle.partitions", str(N_CORES))
+    .config("spark.sql.adaptive.enabled",   "true")
+    .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
+    .config("spark.sql.adaptive.skewJoin.enabled",           "true")
+    .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    .config("spark.kryoserializer.buffer.max", "512m")
+    .config("spark.driver.memory",  "4g")
+    .getOrCreate()
+)
+```
+
+**Pourquoi ces réglages :**
+
+- `shuffle.partitions = N_CORES` : par défaut, Spark crée 200 partitions après un shuffle. Sur quelques dizaines de fichiers en mode local, ça génère une montagne de partitions quasi-vides. Passer à `N_CORES` supprime ce surcoût inutile.
+- **AQE (Adaptive Query Execution)** : permet à Spark de fusionner dynamiquement les petites partitions après un shuffle, sans qu'on ait à le faire à la main.
+- **KryoSerializer** : la sérialisation Kryo est environ 10 fois plus rapide que la sérialisation Java par défaut, surtout avec des UDFs Python.
+- **Broadcast join** pour `df_meta` (moins de 1 KB) : en diffusant ce petit DataFrame sur tous les workers, on évite complètement le shuffle lors des jointures de métadonnées.
+
+## 5.2 Identification des shuffles critiques
+
+```{python}
+#| label: fig-shuffles
+#| fig-cap: "Identification et impact estimé des shuffles dans le pipeline."
+
+shuffle_data = pd.DataFrame({
+    "Opération": [
+        "groupBy(filename, word).agg(count)",
+        "rank().over(Window.partitionBy(filename).orderBy(freq))",
+        "write.partitionBy(courant)",
+        "Window.rowsBetween(...) sur fenêtres glissantes",
+        "join(broadcast(df_meta), ...)",
+        "join(df_meta, ...) sans broadcast",
+    ],
+    "Cause": [
+        "Redistribution par (filename, word)",
+        "Tri intra-partition par fréquence",
+        "Tri par courant avant écriture disque",
+        "Tri par (filename, pos, sentence)",
+        "Pas de shuffle (broadcast)",
+        "Hash join sur filename",
+    ],
+    "Impact": ["Élevé","Modéré","Modéré","Modéré","Nul","Faible à Modéré"],
+    "Score":  [3, 2, 2, 2, 0, 1],
+})
+
+fig = px.bar(
+    shuffle_data.sort_values("Score"),
+    x="Score", y="Opération",
+    color="Impact",
+    color_discrete_map={
+        "Élevé":           "#d62728",
+        "Modéré":          "#ff7f0e",
+        "Faible à Modéré": "#bcbd22",
+        "Nul":             "#2ca02c",
+    },
+    orientation="h",
+    title="Shuffles critiques dans le pipeline Spark",
+    labels={"Score":"Impact (0=nul, 3=élevé)","Opération":"Opération"},
+    template="plotly_white", height=380,
+)
+fig.update_layout(
+    legend_title="Impact",
+    font=dict(size=11),
+    margin=dict(l=350),
+)
+fig.show()
+```
+
+## 5.3 Stratégies de mitigation
+
+### 5.3.1 Broadcast join vs hash join
+
+```{python}
+#| label: benchmark-broadcast
+#| echo: true
+
+_bench_left = words_sdf.select("filename","word","freq")
+_bench_meta = df_meta.select("filename","author")
+
+t0 = time.time()
+for _ in range(3):
+    _bench_left.join(_bench_meta, "filename", "left").count()
+t_normal = round((time.time()-t0)/3, 3)
+
+t0 = time.time()
+for _ in range(3):
+    _bench_left.join(F.broadcast(_bench_meta), "filename", "left").count()
+t_bcast = round((time.time()-t0)/3, 3)
+
+gain_pct = round((t_normal - t_bcast)/max(t_normal, 1e-9)*100, 1)
+print(f"Join standard  (moy 3 runs) : {t_normal}s")
+print(f"Broadcast join (moy 3 runs) : {t_bcast}s")
+print(f"Gain : {gain_pct}%")
+```
+
+### 5.3.2 Effet de spark.sql.shuffle.partitions
+
+```{python}
+#| label: benchmark-shuffle-partitions
+
+results_sp = {}
+for sp in [4, 8, 50, 200]:
+    spark.conf.set("spark.sql.shuffle.partitions", str(sp))
+    t0 = time.time()
+    (corpus_sdf
+     .select(F.explode(F.split(F.lower("text"), r"\s+")).alias("w"))
+     .groupBy("w").count().count())
+    results_sp[sp] = round(time.time()-t0, 3)
+
+spark.conf.set("spark.sql.shuffle.partitions", str(N_CORES))
+
+sp_df = pd.DataFrame({
+    "shuffle.partitions": list(results_sp.keys()),
+    "temps (s)":          list(results_sp.values()),
+})
+print(sp_df.to_string(index=False))
+```
+
+```{python}
+#| label: fig-shuffle-partitions
+#| fig-cap: "Temps d'exécution d'un groupBy simple selon spark.sql.shuffle.partitions. Trop de partitions = surcoût de scheduling ; trop peu = sous-utilisation."
+
+fig = px.line(
+    sp_df, x="shuffle.partitions", y="temps (s)",
+    markers=True,
+    title="Impact de shuffle.partitions sur le temps d'un groupBy",
+    labels={
+        "shuffle.partitions": "spark.sql.shuffle.partitions",
+        "temps (s)":          "Temps (s)",
+    },
+    template="plotly_white", height=350,
+)
+fig.add_vline(
+    x=N_CORES, line_dash="dash", line_color="green",
+    annotation_text=f"Valeur retenue ({N_CORES} coeurs)",
+    annotation_position="top right",
+)
+fig.update_layout(font=dict(size=11))
+fig.show()
+```
+
+## 5.4 Impact du cache / persist / checkpoint
+
+```{python}
+#| label: benchmark-cache
+
+import pyspark
+
+def run_query(sdf, n=3):
+    times = []
+    for _ in range(n):
+        t0 = time.time()
+        sdf.agg(F.sum("n_words")).collect()
+        times.append(round(time.time()-t0, 3))
+    return times
+
+spark.catalog.clearCache()
+t_no_cache = run_query(stats_sdf)
+
+spark.catalog.clearCache()
+stats_sdf.persist(pyspark.StorageLevel.MEMORY_ONLY)
+stats_sdf.count()
+t_memory = run_query(stats_sdf)
+stats_sdf.unpersist()
+
+spark.catalog.clearCache()
+stats_sdf.persist(pyspark.StorageLevel.DISK_ONLY)
+stats_sdf.count()
+t_disk = run_query(stats_sdf)
+stats_sdf.unpersist()
+
+cache_df = pd.DataFrame({
+    "Stratégie": ["Sans cache"]*3 + ["MEMORY_ONLY"]*3 + ["DISK_ONLY"]*3,
+    "Run":        [1,2,3]*3,
+    "Temps (s)":  t_no_cache + t_memory + t_disk,
+})
+print(cache_df.to_string(index=False))
+```
+
+```{python}
+#| label: fig-cache
+#| fig-cap: "Temps d'exécution pour 3 appels successifs selon la stratégie de cache. MEMORY_ONLY élimine presque entièrement les relectures."
+
+fig = px.line(
+    cache_df, x="Run", y="Temps (s)", color="Stratégie",
+    markers=True,
+    color_discrete_map={
+        "Sans cache":  "#d62728",
+        "MEMORY_ONLY": "#2ca02c",
+        "DISK_ONLY":   "#ff7f0e",
+    },
+    title="Impact du cache Spark — 3 exécutions successives",
+    labels={
+        "Run":        "Exécution n°",
+        "Temps (s)":  "Temps (s)",
+        "Stratégie":  "Stratégie",
+    },
+    template="plotly_white", height=380,
+)
+fig.update_layout(
+    legend_title="Stratégie de cache",
+    font=dict(size=11),
+)
+fig.show()
+```
+
+## 5.5 Comparaison des formats de stockage
+
+Pour choisir le bon format de stockage, on a écrit et relu les mêmes données dans quatre formats différents en mesurant les temps et la taille sur disque. Les calculs sont rapides sur ce volume de données (quelques secondes), mais les écarts relatifs entre formats restent représentatifs.
+
+```{python}
+#| label: benchmark-formats
+
+import shutil
+
+fmt_results = []
+for fmt in ["parquet","orc","json","csv"]:
+    out = str(PARQUET_DIR.parent / f"bench_{fmt}")
+    shutil.rmtree(out, ignore_errors=True)
+
+    t0 = time.time()
+    if fmt == "csv":
+        stats_sdf.write.mode("overwrite").option("header","true").csv(out)
+    elif fmt == "json":
+        stats_sdf.write.mode("overwrite").json(out)
+    elif fmt == "orc":
+        stats_sdf.write.mode("overwrite").orc(out)
+    else:
+        stats_sdf.write.mode("overwrite").parquet(out)
+    t_write = round(time.time()-t0, 3)
+
+    t0 = time.time()
+    if fmt == "csv":
+        spark.read.option("header","true").csv(out).count()
+    elif fmt == "json":
+        spark.read.json(out).count()
+    elif fmt == "orc":
+        spark.read.orc(out).count()
+    else:
+        spark.read.parquet(out).count()
+    t_read = round(time.time()-t0, 3)
+
+    size_b = sum(
+        os.path.getsize(os.path.join(dp, f))
+        for dp, _, fs in os.walk(out) for f in fs
+    )
+    fmt_results.append({
+        "Format":       fmt.upper(),
+        "Ecriture (s)": t_write,
+        "Lecture (s)":  t_read,
+        "Taille (KB)":  round(size_b/1024, 1),
+    })
+
+fmt_df = pd.DataFrame(fmt_results)
+print(fmt_df.to_string(index=False))
+```
+
+```{python}
+#| label: fig-formats
+#| fig-cap: "Comparaison des formats de stockage : temps d'écriture/lecture et taille sur disque."
+
+fig = make_subplots(rows=1, cols=3,
+    subplot_titles=["Ecriture (s)","Lecture (s)","Taille (KB)"])
+
+colors_fmt = {
+    "PARQUET": "#2ca02c",
+    "ORC":     "#1f77b4",
+    "JSON":    "#d62728",
+    "CSV":     "#ff7f0e",
+}
+
+for col_i, metric in enumerate(["Ecriture (s)","Lecture (s)","Taille (KB)"], start=1):
+    fig.add_trace(
+        go.Bar(
+            x=fmt_df["Format"], y=fmt_df[metric],
+            text=fmt_df[metric], textposition="outside",
+            marker_color=[colors_fmt.get(f,"#888") for f in fmt_df["Format"]],
+            showlegend=False,
+        ),
+        row=1, col=col_i
+    )
+
+fig.update_layout(
+    title="Benchmark formats de stockage : CSV / Parquet / ORC / JSON",
+    template="plotly_white", height=420,
+    font=dict(size=11),
+)
+fig.show()
+```
+
+**Bilan :**
+
+| Format | Avantages | Inconvénients | Usage recommandé |
+|---|---|---|---|
+| **Parquet** (retenu) | Lecture rapide, compression, predicate pushdown | Binaire (non lisible) | Production Spark/Pandas |
+| ORC | Très compressé, Hive natif | Moins supporté hors Hive | Ecosystème Hive |
+| JSON | Lisible, universel | Lent, volumineux | Echange/debug |
+| CSV | Universel | Pas de schéma, lent | Interopérabilité externe |
+
+On retient Parquet, partitionné par `courant`. Comme la plupart des requêtes portent sur un seul courant à la fois (Romantisme ou Réalisme), le partition pruning de Spark évite de lire la moitié des fichiers.
+
+---
+
+# 6 — Appendice — Code des pipelines
+
+## A. Pipeline ETL complet
+
+```{python}
+#| label: appendix-etl
+#| echo: true
+#| eval: false
+
+# ── 1. Nettoyage Gutenberg ──────────────────────────────────────────────────
+START_PAT = re.compile(r"\*{3}\s*START OF[^\*]*\*{3}", re.IGNORECASE)
+END_PAT   = re.compile(r"\*{3}\s*END OF[^\*]*\*{3}",   re.IGNORECASE)
+ORNAMENT  = re.compile(r"^\s*[\*\-\=]{3,}\s*$", re.MULTILINE)
+
+def clean_text(text: str) -> str:
+    m = START_PAT.search(text)
+    if m: text = text[m.end():]
+    m = END_PAT.search(text)
+    if m: text = text[:m.start()]
+    text = ORNAMENT.sub("", text)
+    return text.strip()
+
+# ── 2. Création du DataFrame Spark ─────────────────────────────────────────
+# Le chargement cherche d'abord dans DATA/, puis dans uploads/
+# pour permettre l'ajout de nouveaux textes sans modifier le code.
+records = []
+for fname, (title, author, courant) in METADATA.items():
+    candidates = [DATA_DIR / fname, UPLOAD_DIR / fname]
+    path = next((p for p in candidates if p.exists()), None)
+    if path is None:
+        continue
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    records.append((fname, title, author, courant, clean_text(raw)))
+
+corpus_sdf = spark.createDataFrame(records, schema).cache()
+```
+
+## B. Pipeline de statistiques et lisibilité
+
+```{python}
+#| label: appendix-stats
+#| echo: true
+#| eval: false
+
+syllable_udf = F.udf(lambda t: int(sum(
+    len(re.findall(r'[aeiouyàâäéèêëîïôöùûüœ]+', w, re.I))
+    for w in (t or "").split())), LongType())
+
+@F.udf(DoubleType())
+def udf_fk(nw, ns, nsyl):
+    if not nw or not ns: return 0.0
+    return round(206.835 - 1.015*(nw/ns) - 84.6*(nsyl/nw), 3)
+
+@F.udf(DoubleType())
+def udf_km(nw, ns, nsyl):
+    if not nw or not ns: return 0.0
+    return round(209.835 - 2.048*(nw/ns) - 64.3*(nsyl/nw), 3)
+
+stats_sdf = (corpus_sdf
+    .withColumn("n_chars",     F.length("text"))
+    .withColumn("n_words",     F.size(F.split("text", r"\s+")))
+    .withColumn("n_sentences", F.size(F.split("text", r"[.!?]+")))
+    .withColumn("n_syllables", syllable_udf("text"))
+)
+read_sdf = (stats_sdf
+    .withColumn("fk", udf_fk("n_words","n_sentences","n_syllables"))
+    .withColumn("km", udf_km("n_words","n_sentences","n_syllables"))
+)
+```
+
+## C. Pipeline fenêtres glissantes
+
+```{python}
+#| label: appendix-sliding
+#| echo: true
+#| eval: false
+
+def sliding_fk(text, window=500, step=250):
+    words = text.split()
+    out = []
+    for i in range(0, len(words) - window, step):
+        chunk = words[i:i+window]
+        n_s   = max(1, sum(1 for w in chunk if re.search(r'[.!?]$', w)))
+        n_syl = sum(len(re.findall(r'[aeiouyàâäéèêëîïôöùûüœ]+', w, re.I)) for w in chunk)
+        fk    = round(206.835 - 1.015*(window/n_s) - 84.6*(n_syl/window), 2)
+        km    = round(209.835 - 2.048*(window/n_s) - 64.3*(n_syl/window), 2)
+        out.append((i, fk, km))
+    return out
+
+sliding_sdf = (corpus_sdf
+    .filter(F.size(F.split("text", r"\s+")) > 40000)
+    .select("title","author","courant",
+            F.explode(F.udf(sliding_fk, sliding_schema)("text")).alias("w"))
+    .select("title","author","courant",
+            F.col("w.pos").alias("pos"),
+            F.col("w.fk").alias("fk"),
+            F.col("w.km").alias("km"))
+)
+```
+
+## D. Pipeline Zipf
+
+```{python}
+#| label: appendix-zipf
+#| echo: true
+#| eval: false
+
+STOPWORDS_FR = {
+    "le","la","les","de","du","des","un","une","et","en","a",
+    "il","elle","ils","elles","je","tu","nous","vous", ...
+}
+
+words_sdf = (corpus_sdf
+    .select("filename","title","author","courant",
+            F.explode(F.split(
+                F.lower(F.regexp_replace("text", r"[^\w\s]", " ")), r"\s+")
+            ).alias("word"))
+    .filter(F.length("word") > 2)
+    .filter(~F.col("word").isin(STOPWORDS_FR))
+    .groupBy("filename","title","author","courant","word")
+    .agg(F.count("*").alias("freq"))
+)
+
+w_spec = Window.partitionBy("filename").orderBy(F.desc("freq"))
+ranked_sdf = (words_sdf
+    .withColumn("rank",     F.rank().over(w_spec))
+    .withColumn("log_rank", F.log10("rank"))
+    .withColumn("log_freq", F.log10(F.col("freq") + 1))
+)
+```
+
+```{python}
+#| label: session-stop
+#| include: false
+
+spark.stop()
+```

@@ -1,0 +1,8 @@
+project:
+  type: default
+  output-dir: _outdir
+
+execute:
+  freeze: auto
+
+
