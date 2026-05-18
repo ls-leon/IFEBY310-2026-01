@@ -18,8 +18,7 @@ Les dépendances Python sont listées dans le fichier requirements.txt. Pour cr�
 - python -m ipykernel install --user --name=pyenv --display-name "Local Python (pyenv)"
 - deactivate
 
-Il sera ensuite possible de compiler le projet (voir la section
-suivante).
+Il sera ensuite possible de lancer le projet
 
 ## Comment compiler le rapport?
 

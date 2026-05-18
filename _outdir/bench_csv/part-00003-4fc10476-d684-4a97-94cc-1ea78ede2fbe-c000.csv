@@ -1,0 +1,12 @@
+filename,title,author,courant,n_chars,n_words,n_sentences,n_syllables,ttr,avg_word_len
+flaubert_trois_contes.txt,Trois Contes,Flaubert,Réalisme,184579,29705,1950,51836,0.31264096953374854,5.183975761656287
+flaubert_un_coeur_simple.txt,Un Coeur simple,Flaubert,Réalisme,68641,11160,707,19457,0.36684587813620073,5.124193548387097
+Zola_germinal.txt,Germinal,Zola,Réalisme,1011564,164567,10730,282634,0.15171936050362467,5.09194431447374
+Zola_l_assomoir.txt,L'Assommoir,Zola,Réalisme,957615,158729,10854,267979,0.1423519562147775,4.967217314156472
+Zola_lourdes.txt,Lourdes,Zola,Réalisme,194967,31909,1621,55785,0.25729418032530005,5.096211100316525
+Maupassant_candide.txt,Candide,Voltaire,Romantisme,201302,34079,1826,57240,0.24179113236890754,4.894773907685084
+chateaubriand_vie_de_rance.txt,Vie de Rance,Chateaubriand,Romantisme,343872,57701,2509,98956,0.23257829153740836,4.939359803122996
+gautier_clarimonde.txt,La Morte amoureuse (Clarimonde),Gautier,Romantisme,73860,13261,588,20694,0.2856496493477113,4.557951888997813
+gautier_emau.txt,Emaux et Camees,Gautier,Romantisme,90345,13810,665,22749,0.38110065170166546,4.947863866763215
+gautier_menagerie_intime.txt,Menagerie intime,Gautier,Romantisme,88314,14606,570,25367,0.3541010543612214,5.034780227303847
+gautier_sacountala.txt,Sacountala,Gautier,Romantisme,29533,4252,300,7656,0.4134524929444967,5.27140169332079

@@ -1,6 +1,6 @@
 ---
-title: "Analyse Stylométrique du XIXe siècle — Technologie Big Data"
-subtitle: "Pipeline PySpark · Spark NLP · Stylométrie"
+title: "Analyse Stylométrique du XIXe siècle : Technologie Big Data"
+subtitle: "Projet 1, PySpark, Spark NLP"
 author: "Krista Carla Sevi, Mick-Wanderly Laveus, Leon Lafosse"
 date: today
 lang: fr
@@ -14,7 +14,6 @@ format:
     self-contained: true
     theme: cosmo
     fig-align: center
-    math: mathjax
 jupyter: python3
 execute:
   echo: false
@@ -84,17 +83,6 @@ COLOR_AUTHOR = {
 #| label: metadata-and-etl
 #| include: false
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Classifications corrigées :
-#
-#  ROMANTISME : Hugo, Sand, Chateaubriand, Gautier, Voltaire
-#  RÉALISME   : Balzac, Stendhal, Flaubert, Zola
-#
-#  Sources :
-#    - Balzac  → github dh-trier/balzac  (plain text, pas d'en-tête Gutenberg)
-#    - Autres  → Project Gutenberg       (avec balises *** START OF... ***)
-# ─────────────────────────────────────────────────────────────────────────────
-
 METADATA = {
     # ── Balzac (Réalisme) ────────────────────────────────────────────────────
     "Adieu.txt":                   ("Adieu",                           "Balzac", "Réalisme"),
@@ -106,7 +94,6 @@ METADATA = {
     "Combien-l_amour-revient.txt": ("A combien l'amour revient",       "Balzac", "Réalisme"),
     "Deux-jeunes-mariees.txt":     ("Memoires de deux jeunes mariees", "Balzac", "Réalisme"),
     "El-verdugo.txt":              ("El Verdugo",                      "Balzac", "Réalisme"),
-    # Nouveaux textes Balzac (github)
     "Esquisse-d_homme-d_affaires.txt": ("Esquisse d'homme d'affaires", "Balzac", "Réalisme"),
     "Esther-heureuse.txt":             ("Esther heureuse",             "Balzac", "Réalisme"),
     "Etude-de-femme.txt":              ("Etude de femme",              "Balzac", "Réalisme"),
@@ -153,9 +140,6 @@ METADATA = {
     "gautier_sacountala.txt":      ("Sacountala",                      "Gautier", "Romantisme"),
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Nettoyage Gutenberg
-# ─────────────────────────────────────────────────────────────────────────────
 START_PAT = re.compile(r"\*{3}\s*START OF[^\*]*\*{3}", re.IGNORECASE)
 END_PAT   = re.compile(r"\*{3}\s*END OF[^\*]*\*{3}",   re.IGNORECASE)
 ORNAMENT  = re.compile(r"^\s*[\*\-\=]{3,}\s*$", re.MULTILINE)
@@ -175,15 +159,10 @@ def clean_text(text: str) -> str:
     text = ROMAN_CH.sub("", text)
     return text.strip()
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Chargement du corpus
-#  Priorité : DATA/ en premier, puis /mnt/user-data/uploads/ pour les nouveaux
-# ─────────────────────────────────────────────────────────────────────────────
 UPLOAD_DIR = Path("/mnt/user-data/uploads")
 
 records = []
 for fname, (title, author, courant) in METADATA.items():
-    # Chercher d'abord dans DATA/, puis dans le répertoire d'uploads
     candidates = [DATA_DIR / fname, UPLOAD_DIR / fname]
     path = next((p for p in candidates if p.exists()), None)
     if path is None:
@@ -397,9 +376,9 @@ reg_df = pd.DataFrame(reg_rows)
 
 ## 1.1 Présentation des textes
 
-Pour ce projet, on travaille sur des romans et nouvelles du XIXe siècle, stockés sous forme de fichiers `.txt` dans un dossier `DATA/`. Les textes de Balzac viennent d'un dépôt GitHub ([dh-trier/balzac](https://github.com/dh-trier/balzac/tree/master)) — ce sont de simples fichiers texte, sans en-tête particulier. Pour tous les autres auteurs, les fichiers ont été récupérés sur le Project Gutenberg, ce qui implique la présence de balises `*** START OF... ***` qu'il faut retirer avant de travailler sur le texte.
+Pour ce projet on a récupéré des romans et nouvelles du XIXe siècle en `.txt` qu'on a mis dans un dossier `DATA/`. Les textes de Balzac viennent du dépôt GitHub [dh-trier/balzac](https://github.com/dh-trier/balzac/tree/master), ce sont des fichiers texte bruts sans mise en forme particulière. Pour les autres auteurs, on a tout téléchargé sur le Project Gutenberg.
 
-Au total, on dispose de **`{python} N_DOCS` œuvres**, réparties entre deux courants littéraires :
+Au total on a **`{python} N_DOCS` œuvres**, réparties entre deux courants :
 
 - **Romantisme** : Hugo, Sand, Chateaubriand, Gautier, Voltaire
 - **Réalisme** : Balzac, Stendhal, Flaubert, Zola
@@ -427,7 +406,7 @@ tbl.style\
 #| eval: false
 #| code-fold: false
 
-# Extrait illustratif — voir appendice pour le pipeline complet
+# Extrait illustratif, voir appendice pour le pipeline complet
 
 START_PAT = re.compile(r"\*{3}\s*START OF[^\*]*\*{3}", re.IGNORECASE)
 END_PAT   = re.compile(r"\*{3}\s*END OF[^\*]*\*{3}",   re.IGNORECASE)
@@ -443,13 +422,13 @@ def clean_text(text: str) -> str:
     return text.strip()
 ```
 
-La fonction `clean_text()` s'occupe de nettoyer les fichiers des deux sources : elle retire les en-têtes et pieds de page Gutenberg quand ils sont présents, supprime les séparateurs ornementaux (`* * *`) et les lignes ne contenant que des chiffres romains (numéros de chapitres). Pour les fichiers Balzac sans en-tête, elle ne fait rien de particulier — ce qui est exactement ce qu'on veut. Par ailleurs, le chargement cherche d'abord dans `DATA/`, puis dans le dossier d'uploads, de sorte qu'on peut ajouter de nouveaux fichiers sans toucher au code.
+La fonction `clean_text()` nettoie les fichiers des deux sources : elle enlève les en-têtes et pieds de page Gutenberg, les séparateurs `* * *` et les lignes qui ne contiennent que des chiffres romains (chapitres). Pour les fichiers Balzac sans en-tête, elle ne fait rien de spécial.
 
 ---
 
 # 2 — Chargement et Transformation
 
-Une fois les fichiers chargés et nettoyés, on passe au traitement via PySpark. Chaque texte devient une ligne dans un DataFrame Spark, et on enchaîne plusieurs transformations : calcul de statistiques de base sur le texte, mesures de richesse lexicale, et segmentation entre les passages de dialogue et de narration.
+Une fois les fichiers nettoyés, on les charge dans Spark. Chaque texte devient une ligne dans un DataFrame, et on calcule ensuite différentes statistiques : nombre de mots, de phrases, richesse du vocabulaire, et on essaie de distinguer les passages de dialogue du reste.
 
 ## 2.1 Statistiques descriptives sur les textes
 
@@ -504,7 +483,7 @@ fig.show()
 
 ## 2.2 Richesse lexicale — Type-Token Ratio et longueur moyenne des mots
 
-Le **Type-Token Ratio (TTR)** est une façon simple de mesurer la variété du vocabulaire d'un texte : on divise le nombre de mots distincts par le nombre total de mots. Plus le ratio est élevé, moins l'auteur se répète.
+Le **Type-Token Ratio (TTR)** mesure simplement à quel point un auteur varie son vocabulaire : on divise le nombre de mots différents par le nombre total de mots. Plus c'est élevé, moins il se répète.
 
 ```{python}
 #| label: fig-ttr
@@ -538,7 +517,7 @@ fig.show()
 
 ## 2.3 Segmentation dialogue / narration
 
-Avant d'annoter les textes, on cherche à distinguer les passages de dialogue des passages narratifs dans chaque œuvre. La règle retenue est simple : une ligne qui commence par un tiret cadratin (—) ou des guillemets est considérée comme du dialogue ; tout le reste est de la narration.
+On a essayé de distinguer les dialogues du reste dans chaque texte. La règle qu'on a choisie est assez simple : une ligne qui commence par un tiret (—) ou des guillemets est du dialogue, tout le reste c'est de la narration. C'est une approximation, mais ça marche raisonnablement bien sur des textes du XIXe siècle.
 
 ```{python}
 #| label: fig-dialog-pct
@@ -579,7 +558,7 @@ fig = px.bar(
     x="title",
     y=["dialog_lines","narration_lines"],
     barmode="stack",
-    title="Dialogue vs Narration — 30 oeuvres avec le plus de dialogue",
+    title="Dialogue et Narration : 30 oeuvres avec le plus de dialogue",
     labels={"value":"Lignes","title":"Oeuvre","variable":"Type"},
     template="plotly_white",
     height=480,
@@ -589,7 +568,6 @@ fig = px.bar(
     },
 )
 fig.update_xaxes(tickangle=-45, tickfont_size=9)
-# Renommer la légende proprement
 newnames = {"dialog_lines": "Dialogue", "narration_lines": "Narration"}
 fig.for_each_trace(lambda t: t.update(name=newnames.get(t.name, t.name)))
 fig.update_layout(
@@ -603,7 +581,7 @@ fig.show()
 
 # 3 — Pipelines d'annotation (Spark NLP)
 
-Une fois les textes nettoyés et segmentés, on peut les annoter. Comme l'objectif est avant tout de faire de la stylométrie, on ne va pas jusqu'à la lemmatisation ou l'étiquetage grammatical, on s'arrête à la tokenisation. Le pipeline enchaîne cinq étapes :
+Pour l'annotation, on a utilisé Spark NLP. Comme le but du projet est surtout de faire de la stylométrie, on n'a pas cherché à faire de la lemmatisation ou du POS tagging complet, on s'est arrêtés à la tokenisation. Le pipeline fait cinq étapes dans l'ordre :
 
 | Etape | Annotateur | Rôle |
 |---|---|---|
@@ -644,7 +622,7 @@ annotated = (
 )
 ```
 
-L'annotation se fait **en parallèle, roman par roman**, grâce à un `repartition("filename")` avant de lancer le pipeline.
+L'annotation se fait roman par roman en parallèle grâce au `repartition("filename")` avant le pipeline.
 
 ---
 
@@ -652,27 +630,27 @@ L'annotation se fait **en parallèle, roman par roman**, grâce à un `repartiti
 
 ## 4.1 Loi de Zipf
 
-On commence l'analyse stylométrique par la loi de Zipf. L'idée est double : d'abord vérifier que nos textes se comportent comme des textes naturels (ce qui est généralement le cas pour la langue écrite), ensuite comparer les paramètres de cette loi d'un auteur à l'autre pour voir si on peut dégager des tendances stylistiques.
+On a commencé par regarder la loi de Zipf. L'idée c'est de vérifier que nos textes se comportent comme des textes en langue naturelle, et de voir si les paramètres varient d'un auteur à l'autre.
 
-La loi de Zipf dit que la fréquence $\f$ d'un mot de rang $\r$ suit :
+La loi dit que la fréquence d'un mot de rang *r* suit :
 
-$$
-f = \frac{C}{r^{s}}
-$$
+<div style="background:#f8f9fa;border-left:3px solid #4C72B0;padding:10px 20px;margin:14px 0;font-family:Georgia,serif;font-size:1.08em;line-height:2;">
+  <em>f</em> &nbsp;=&nbsp; <em>C</em> &nbsp;/&nbsp; <em>r <sup>s</sup></em>
+</div>
 
-où $C$ et $s$ sont des paramètres à estimer. Pour que la relation soit plus facile à visualiser sous forme de droite, on passe au logarithme (base 10). En posant $K = \log(C)$, on obtient :
+Pour visualiser ça facilement, on prend le log des deux côtés et on obtient une droite :
 
-$$
-\log(f) = K - s \cdot \log(r)
-$$
+<div style="background:#f8f9fa;border-left:3px solid #4C72B0;padding:10px 20px;margin:14px 0;font-family:Georgia,serif;font-size:1.08em;line-height:2;">
+  log(<em>f</em>) &nbsp;=&nbsp; <em>K</em> &nbsp;&minus;&nbsp; <em>s</em> &middot; log(<em>r</em>)
+</div>
 
-On trace donc $\log(f)$ en fonction de $\log(r)$, et on s'attend à obtenir une droite de pente $-s$ proche de $-1$ pour un texte en langue naturelle.
+On s'attend à une pente *s* proche de &minus;1 pour un texte normal.
 
 ### 4.1.1 Zipf plots par courant
 
 ```{python}
 #| label: fig-zipf-courant
-#| fig-cap: "Loi de Zipf (log-log) — Top-200 mots par roman. Une droite parfaite confirme la loi de Zipf."
+#| fig-cap: "Loi de Zipf (log-log) : Top-200 mots par roman. Une droite parfaite confirme la loi de Zipf."
 
 fig = make_subplots(rows=1, cols=2,
     subplot_titles=["Romantisme","Réalisme"],
@@ -701,7 +679,7 @@ fig.update_xaxes(title_text="log10(rang)",      row=1, col=1)
 fig.update_xaxes(title_text="log10(rang)",      row=1, col=2)
 fig.update_yaxes(title_text="log10(fréquence)", row=1, col=1)
 fig.update_layout(
-    title="Loi de Zipf — comparaison Romantisme / Réalisme",
+    title="Loi de Zipf : comparaison Romantisme / Réalisme",
     template="plotly_white", height=450,
     legend_title="Auteur",
     font=dict(size=11),
@@ -711,7 +689,7 @@ fig.show()
 
 ### 4.1.2 Paramètres de régression Zipf par auteur
 
-Sans surprise, $K$ varie assez largement (entre 2 et 4) d'un texte à l'autre — c'est simplement parce que les œuvres n'ont pas toutes la même taille. En revanche, $s$ reste remarquablement stable. L'erreur standard des régressions tourne autour de 0.01 ou 0.02, et le $r$ dépasse systématiquement 0.95 : les Zipf plots log-log sont bien des droites.
+*K* varie pas mal d'un texte à l'autre (entre 2 et 4) parce que les œuvres n'ont pas la même taille. Par contre *s* est assez stable. Le *r*² dépasse 0.95 dans presque tous les cas, donc les plots log-log sont bien des droites, nos textes suivent bien la loi de Zipf.
 
 ```{python}
 #| label: fig-zipf-slope
@@ -811,20 +789,39 @@ fig.show()
 
 ## 4.2 Indices de lisibilité : Flesch-Kincaid et Kandel-Moles
 
-On utilise deux indices pour quantifier la complexité de lecture des textes. Pour un passage donné, en notant **mots** le nombre de mots, **phrases** le nombre de phrases et **syllabes** le nombre de syllabes, les deux formules sont les suivantes :
+On a calculé deux indices de lisibilité. En notant **mots**, **phrases** et **syllabes** les comptes correspondants sur un passage donné, les formules sont :
 
-$$
-\text{FK} = 206.835 - 1.015 \cdot \left( \frac{\text{mots}}{\text{phrases}} \right) - 84.6 \cdot \left( \frac{\text{syllabes}}{\text{mots}} \right)
-$$
+<div style="background:#f8f9fa;border-left:3px solid #4C72B0;padding:14px 22px;margin:14px 0;font-family:Georgia,serif;font-size:1.05em;line-height:2.6;">
+  <strong>FK</strong> &nbsp;=&nbsp; 206.835
+  &nbsp;&minus;&nbsp; 1.015 &times;
+  <span style="display:inline-block;text-align:center;vertical-align:middle;margin:0 4px;">
+    <span style="display:block;border-bottom:1px solid #555;padding:0 6px;">mots</span>
+    <span style="display:block;padding:0 6px;">phrases</span>
+  </span>
+  &nbsp;&minus;&nbsp; 84.6 &times;
+  <span style="display:inline-block;text-align:center;vertical-align:middle;margin:0 4px;">
+    <span style="display:block;border-bottom:1px solid #555;padding:0 6px;">syllabes</span>
+    <span style="display:block;padding:0 6px;">mots</span>
+  </span>
+</div>
 
-$$
-\text{KM} = 209.835 - 2.048 \cdot \left( \frac{\text{mots}}{\text{phrases}} \right) - 64.3 \cdot \left( \frac{\text{syllabes}}{\text{mots}} \right)
-$$
+<div style="background:#f8f9fa;border-left:3px solid #DD8452;padding:14px 22px;margin:14px 0;font-family:Georgia,serif;font-size:1.05em;line-height:2.6;">
+  <strong>KM</strong> &nbsp;=&nbsp; 209.835
+  &nbsp;&minus;&nbsp; 2.048 &times;
+  <span style="display:inline-block;text-align:center;vertical-align:middle;margin:0 4px;">
+    <span style="display:block;border-bottom:1px solid #555;padding:0 6px;">mots</span>
+    <span style="display:block;padding:0 6px;">phrases</span>
+  </span>
+  &nbsp;&minus;&nbsp; 64.3 &times;
+  <span style="display:inline-block;text-align:center;vertical-align:middle;margin:0 4px;">
+    <span style="display:block;border-bottom:1px solid #555;padding:0 6px;">syllabes</span>
+    <span style="display:block;padding:0 6px;">mots</span>
+  </span>
+</div>
 
-- **FK** : un score élevé correspond à un texte plus difficile à lire (phrases longues, mots à nombreuses syllabes).
-- **KM** : c'est l'inverse — plus le score est haut, plus le texte est facile à lire.
+Pour FK, un score élevé = texte difficile (phrases longues, beaucoup de syllabes). Pour KM c'est l'inverse, plus c'est élevé plus c'est facile à lire.
 
-Pour compter les syllabes, on s'appuie sur les groupes de voyelles phonétiques du français, ce qui donne une approximation suffisante pour comparer des auteurs à grande échelle.
+Pour compter les syllabes on cherche les groupes de voyelles phonétiques du français, c'est une approximation mais ça suffit pour comparer des auteurs.
 
 ### 4.2.1 Indices globaux par oeuvre
 
@@ -882,7 +879,7 @@ for col_i, col_name in enumerate(["fk","km"], start=1):
         )
 
 fig.update_layout(
-    title="FK et KM — distribution par courant littéraire",
+    title="FK et KM : distribution par courant littéraire",
     template="plotly_white", height=430,
     legend_title="Courant",
     font=dict(size=11),
@@ -926,9 +923,9 @@ fig.update_layout(
 fig.show()
 ```
 
-### 4.2.4 Indices par fenêtre glissante (FK — window=500, step=250)
+### 4.2.4 Indices sur fenêtres glissantes (window=500, step=250)
 
-Dans la section précédente, on a attribué un score de lisibilité à chaque texte pris dans son ensemble. Mais un roman n'est pas homogène : certains passages sont denses et complexes, d'autres beaucoup plus légers. Pour rendre ça visible, on découpe chaque texte en fenêtres de 500 mots consécutifs, avec un pas de 250 mots, et on calcule le FK de chacune. On obtient ainsi une courbe de lisibilité tout au long du texte — les pics correspondant souvent aux dialogues, naturellement plus courts et plus vifs.
+Un roman n'est pas homogène du début à la fin. Pour voir comment la lisibilité évolue au fil d'un texte, on a découpé chaque œuvre en fenêtres de 500 mots avec un pas de 250, et on a calculé le FK de chaque fenêtre. Les pics correspondent souvent aux passages de dialogue qui sont naturellement plus courts et directs.
 
 ```{python}
 #| label: fig-sliding-courant
@@ -940,7 +937,7 @@ for courant in ["Romantisme","Réalisme"]:
         continue
     fig = px.line(
         sub, x="pos", y="fk", color="title",
-        title=f"FK glissant — {courant}",
+        title=f"FK glissant : {courant}",
         labels={"pos":"Position (mots)","fk":"FK","title":"Oeuvre"},
         template="plotly_white", height=380,
     )
@@ -966,7 +963,7 @@ stab = (
 fig = px.bar(
     stab, x="title", y="fk_std",
     color="courant", color_discrete_map=COLOR_COURANT,
-    title="Stabilité du FK glissant — écart-type par oeuvre",
+    title="Stabilité du FK glissant : écart-type par oeuvre",
     labels={"fk_std":"Ecart-type FK","title":"Oeuvre","courant":"Courant"},
     text_auto=".2f",
     template="plotly_white", height=420,
@@ -979,92 +976,20 @@ fig.update_layout(
 fig.show()
 ```
 
-## 4.3 Radar stylistique par auteur
+## 4.3 Distance stylistique entre auteurs
 
-Le radar permet de voir d'un coup d'œil le profil stylistique de chaque auteur sur plusieurs dimensions à la fois. Au lieu de comparer les indicateurs un par un, on les regroupe dans un graphique en toile d'araignée où chaque axe représente une caractéristique différente.
+Pour finir l'analyse stylométrique, on a calculé une distance entre chaque paire d'auteurs sur la base de leurs indicateurs (FK, KM, TTR, longueur moyenne des mots). On standardise d'abord avec `StandardScaler` pour que chaque dimension ait le même poids, puis on calcule la distance euclidienne :
 
-**Les 5 dimensions retenues :**
+<div style="background:#f8f9fa;border-left:3px solid #4C72B0;padding:10px 22px;margin:14px 0;font-family:Georgia,serif;font-size:1.08em;line-height:2.2;">
+  <em>d</em>(<em>i</em>,&thinsp;<em>j</em>) &nbsp;=&nbsp;
+  <span style="font-size:1.4em;vertical-align:middle;">&radic;</span><span style="display:inline-block;border-top:1.5px solid #333;padding:0 4px;vertical-align:middle;">&nbsp;&sum;<sub style="font-size:0.75em;">k=1..4</sub> &nbsp;(<em>x</em><sub><em>i,k</em></sub> &minus; <em>x</em><sub><em>j,k</em></sub>)<sup>2</sup>&nbsp;</span>
+</div>
 
-- **FK (difficulté de lecture)** : moyenne de l'indice Flesch-Kincaid sur l'ensemble des œuvres de l'auteur — un score élevé trahit des phrases longues et un vocabulaire chargé en syllabes.
-- **KM (facilité de lecture)** : indice de Kandel-Moles moyen — il va dans le sens inverse du FK ; plus c'est élevé, plus c'est facile à lire.
-- **Richesse du vocabulaire (TTR)** : Type-Token Ratio moyen — plus l'auteur varie son vocabulaire, plus ce score est haut.
-- **Longueur des mots** : nombre de caractères moyen par mot — un proxy du registre de langue : les textes soutenus ont tendance à utiliser des mots plus longs.
-- **Nombre de phrases moyen** : le volume de phrases dans les œuvres de l'auteur, qui reflète en partie sa façon de structurer ses textes.
-
-**Normalisation :** chaque axe est ramené entre 0 et 1 (min-max sur l'ensemble des textes) pour rendre les dimensions comparables entre elles, peu importe leurs unités. Un auteur avec un grand polygone a un style marqué sur plusieurs axes ; un polygone serré au centre indique un style proche de la moyenne générale.
-
-**Comment lire le graphique :** deux auteurs dont les polygones se superposent ont des styles proches ; plus ils sont distincts, plus leurs façons d'écrire divergent.
-
-```{python}
-#| label: fig-radar
-#| fig-cap: "Profil stylistique radar par auteur : 5 dimensions normalisées (0 a 1) permettent une comparaison visuelle globale."
-
-from plotly.colors import hex_to_rgb
-
-def normalize_col(s):
-    mn, mx = s.min(), s.max()
-    return (s - mn) / (mx - mn + 1e-9)
-
-radar_df = read_pd.groupby("author").agg(
-    fk=("fk","mean"),
-    km=("km","mean"),
-    ttr=("ttr","mean"),
-    avg_word_len=("avg_word_len","mean"),
-    n_sentences=("n_sentences","mean"),
-).reset_index()
-
-for col in ["fk","km","ttr","avg_word_len","n_sentences"]:
-    radar_df[col] = normalize_col(radar_df[col])
-
-dims   = ["fk","km","ttr","avg_word_len","n_sentences"]
-labels = [
-    "FK (difficulté)",
-    "KM (lisibilité)",
-    "Richesse vocab. (TTR)",
-    "Longueur mots",
-    "Nb phrases moyen",
-]
-
-fig = go.Figure()
-for _, row in radar_df.iterrows():
-    vals  = [row[d] for d in dims] + [row[dims[0]]]
-    lbs   = labels + [labels[0]]
-    color = COLOR_AUTHOR.get(row["author"], "#888")
-    rgb   = hex_to_rgb(color)
-    fig.add_trace(go.Scatterpolar(
-        r=vals, theta=lbs, fill="toself",
-        name=row["author"],
-        line_color=color,
-        fillcolor=f"rgba({rgb[0]},{rgb[1]},{rgb[2]},0.15)",
-    ))
-
-fig.update_layout(
-    polar=dict(radialaxis=dict(visible=True, range=[0,1])),
-    title="Profil stylistique radar par auteur (normalisé 0 a 1)",
-    template="plotly_white", height=550,
-    legend_title="Auteur",
-    font=dict(size=11),
-)
-fig.show()
-```
-
-## 4.4 Distance stylistique entre auteurs
-
-Pour aller plus loin que le radar, on calcule une distance chiffrée entre chaque paire d'auteurs. L'idée est simple : si deux auteurs ont des valeurs proches sur tous les indicateurs, leur style est similaire ; si leurs valeurs divergent sur plusieurs axes, leur style est différent.
-
-**Méthode :** on repart des quatre indicateurs — FK, KM, TTR et longueur moyenne des mots — en les standardisant d'abord avec `StandardScaler` (centrage-réduction), pour que chaque dimension pèse autant dans le calcul quelle que soit son échelle. La distance entre deux auteurs $i$ et $j$ est ensuite la **distance euclidienne** dans cet espace à 4 dimensions :
-
-$$
-d(i, j) = \sqrt{\sum_{k=1}^{4} (x_{i,k} - x_{j,k})^2}
-$$
-
-où $x_{i,k}$ est la valeur standardisée du $k$-ième indicateur pour l'auteur $i$.
-
-**Comment lire la heatmap :** la matrice est symétrique — la distance de $A$ vers $B$ est la même que de $B$ vers $A$ — et la diagonale est nulle. Les cases foncées signalent des styles proches, les cases claires des styles éloignés. On peut ainsi vérifier si les auteurs d'un même courant se regroupent vraiment, ou si les similitudes stylistiques s'affranchissent parfois des frontières entre Romantisme et Réalisme.
+Les cases foncées dans la heatmap = styles proches, cases claires = styles éloignés. La diagonale est nulle (un auteur est à distance 0 de lui-même).
 
 ```{python}
 #| label: fig-heatmap-distance
-#| fig-cap: "Matrice de distance euclidienne entre auteurs sur 4 indices stylistiques normalisés. Plus la couleur est foncée, plus les styles sont proches."
+#| fig-cap: "Matrice de distance euclidienne entre auteurs sur 4 indices stylistiques. Plus la couleur est foncée, plus les styles sont proches."
 
 from sklearn.preprocessing import StandardScaler
 
@@ -1099,7 +1024,11 @@ fig.show()
 
 # 5 — Expérience Spark et Formats Big Data
 
+On explique ici les choix qu'on a faits pour configurer Spark, éviter les shuffles inutiles, utiliser le cache et choisir le bon format de stockage.
+
 ## 5.1 Configuration de la session Spark
+
+Voici la configuration qu'on a utilisée :
 
 ```{python}
 #| label: spark-config
@@ -1112,48 +1041,55 @@ spark = (
     .appName("Stylometry19C")
     .master(f"local[{N_CORES}]")
     .config("spark.sql.shuffle.partitions", str(N_CORES))
-    .config("spark.sql.adaptive.enabled",   "true")
+    .config("spark.default.parallelism",    str(N_CORES))
+    .config("spark.sql.adaptive.enabled",                    "true")
     .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
     .config("spark.sql.adaptive.skewJoin.enabled",           "true")
     .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
     .config("spark.kryoserializer.buffer.max", "512m")
     .config("spark.driver.memory",  "4g")
+    .config("spark.executor.memory","4g")
     .getOrCreate()
 )
 ```
 
-**Pourquoi ces réglages :**
+Voici pourquoi chaque option :
 
-- `shuffle.partitions = N_CORES` : par défaut, Spark crée 200 partitions après un shuffle. Sur quelques dizaines de fichiers en mode local, ça génère une montagne de partitions quasi-vides. Passer à `N_CORES` supprime ce surcoût inutile.
-- **AQE (Adaptive Query Execution)** : permet à Spark de fusionner dynamiquement les petites partitions après un shuffle, sans qu'on ait à le faire à la main.
-- **KryoSerializer** : la sérialisation Kryo est environ 10 fois plus rapide que la sérialisation Java par défaut, surtout avec des UDFs Python.
-- **Broadcast join** pour `df_meta` (moins de 1 KB) : en diffusant ce petit DataFrame sur tous les workers, on évite complètement le shuffle lors des jointures de métadonnées.
+**`spark.sql.shuffle.partitions = N_CORES`** : Par défaut Spark crée 200 partitions après chaque shuffle. Sur notre corpus ça donne des centaines de partitions presque vides, ce qui est inutile. On met N_CORES pour avoir des partitions de taille raisonnable.
+
+**`spark.default.parallelism = N_CORES`** : Même idée pour les opérations RDD qui ne passent pas par le moteur SQL.
+
+**AQE (Adaptive Query Execution)** : Ça permet à Spark d'ajuster le plan d'exécution après chaque shuffle, notamment de fusionner les petites partitions automatiquement. Pratique parce qu'on a beaucoup plus de fichiers Balzac que d'autres auteurs, ce qui crée un déséquilibre.
+
+**KryoSerializer** : Sérialisation plus rapide que le Java par défaut, surtout utile quand on a des UDFs Python qui font des allers-retours entre la JVM et Python.
+
+**Mémoire à 4 Go** : En mode local tout tourne dans la même JVM. 4 Go c'est suffisant pour mettre nos DataFrames en cache sans déborder sur le disque.
 
 ## 5.2 Identification des shuffles critiques
 
+Un **shuffle** c'est quand Spark doit redistribuer les données entre les partitions : c'est l'opération la plus coûteuse dans un pipeline. On les a repérés dans le Spark UI (onglet *SQL / Details*) :
+
 ```{python}
 #| label: fig-shuffles
-#| fig-cap: "Identification et impact estimé des shuffles dans le pipeline."
+#| fig-cap: "Shuffles identifiés dans le pipeline et leur impact estimé. Le groupBy sur les mots est le shuffle le plus coûteux."
 
 shuffle_data = pd.DataFrame({
     "Opération": [
         "groupBy(filename, word).agg(count)",
-        "rank().over(Window.partitionBy(filename).orderBy(freq))",
+        "rank().over(Window.partitionBy(filename))",
         "write.partitionBy(courant)",
-        "Window.rowsBetween(...) sur fenêtres glissantes",
-        "join(broadcast(df_meta), ...)",
-        "join(df_meta, ...) sans broadcast",
+        "Window glissante (sliding_fk)",
+        "join(broadcast(df_meta))",
     ],
-    "Cause": [
-        "Redistribution par (filename, word)",
-        "Tri intra-partition par fréquence",
+    "Déclencheur": [
+        "Redistribution par (filename, word) : hash partitioning",
+        "Tri intra-partition par fréquence décroissante",
         "Tri par courant avant écriture disque",
-        "Tri par (filename, pos, sentence)",
-        "Pas de shuffle (broadcast)",
-        "Hash join sur filename",
+        "Tri par (filename, pos) pour les fenêtres",
+        "Pas de shuffle : df_meta diffusé sur tous les workers",
     ],
-    "Impact": ["Élevé","Modéré","Modéré","Modéré","Nul","Faible à Modéré"],
-    "Score":  [3, 2, 2, 2, 0, 1],
+    "Impact": ["Élevé", "Modéré", "Modéré", "Modéré", "Nul"],
+    "Score":  [3, 2, 2, 2, 0],
 })
 
 fig = px.bar(
@@ -1161,168 +1097,94 @@ fig = px.bar(
     x="Score", y="Opération",
     color="Impact",
     color_discrete_map={
-        "Élevé":           "#d62728",
-        "Modéré":          "#ff7f0e",
-        "Faible à Modéré": "#bcbd22",
-        "Nul":             "#2ca02c",
+        "Élevé":  "#d62728",
+        "Modéré": "#ff7f0e",
+        "Nul":    "#2ca02c",
     },
     orientation="h",
     title="Shuffles critiques dans le pipeline Spark",
-    labels={"Score":"Impact (0=nul, 3=élevé)","Opération":"Opération"},
-    template="plotly_white", height=380,
+    labels={"Score": "Impact (0 = nul, 3 = élevé)", "Opération": "Opération"},
+    template="plotly_white", height=340,
 )
 fig.update_layout(
     legend_title="Impact",
     font=dict(size=11),
-    margin=dict(l=350),
+    margin=dict(l=340),
 )
 fig.show()
 ```
+
+Le shuffle le plus lourd c'est le `groupBy(filename, word)` pour les fréquences. On n'a pas vraiment le choix : on part d'un DataFrame avec une ligne par texte, et on veut une ligne par mot par fichier. Spark doit tout redistribuer, avec des dizaines de romans et des dizaines de milliers de mots distincts, ça fait beaucoup de données à déplacer.
 
 ## 5.3 Stratégies de mitigation
 
-### 5.3.1 Broadcast join vs hash join
+### Broadcast join pour les métadonnées
+
+`df_meta` (titre/auteur/courant) ne contient que quelques dizaines de lignes. Sans rien faire, un `join` avec `words_sdf` ferait un shuffle des deux côtés. En utilisant `F.broadcast(df_meta)`, Spark copie ce petit DataFrame sur chaque worker et le join se fait localement, sans shuffle du tout.
 
 ```{python}
-#| label: benchmark-broadcast
+#| label: show-broadcast
 #| echo: true
+#| eval: false
+#| code-fold: false
 
-_bench_left = words_sdf.select("filename","word","freq")
-_bench_meta = df_meta.select("filename","author")
+# Sans broadcast : shuffle des deux côtés
+words_sdf.join(df_meta, "filename", "left")
 
-t0 = time.time()
-for _ in range(3):
-    _bench_left.join(_bench_meta, "filename", "left").count()
-t_normal = round((time.time()-t0)/3, 3)
-
-t0 = time.time()
-for _ in range(3):
-    _bench_left.join(F.broadcast(_bench_meta), "filename", "left").count()
-t_bcast = round((time.time()-t0)/3, 3)
-
-gain_pct = round((t_normal - t_bcast)/max(t_normal, 1e-9)*100, 1)
-print(f"Join standard  (moy 3 runs) : {t_normal}s")
-print(f"Broadcast join (moy 3 runs) : {t_bcast}s")
-print(f"Gain : {gain_pct}%")
+# Avec broadcast : df_meta copié sur chaque worker, pas de shuffle
+words_sdf.join(F.broadcast(df_meta), "filename", "left")
 ```
 
-### 5.3.2 Effet de spark.sql.shuffle.partitions
+### Répartition initiale par `filename`
+
+Pour les fenêtres glissantes, on repartitionne par `filename` avant les UDFs. Comme ça tous les mots d'un même roman sont sur la même partition, et Spark n'a pas besoin de faire un shuffle supplémentaire pour les regrouper.
+
+### Réglage de `shuffle.partitions`
+
+Avec 200 partitions par défaut, chaque `groupBy` produit 200 fichiers dont la plupart sont vides sur notre corpus. En passant à `N_CORES`, on réduit le temps de scheduling. L'AQE fusionne automatiquement les partitions qui restent trop petites.
 
 ```{python}
-#| label: benchmark-shuffle-partitions
+#| label: fig-shuffle-partitions-static
+#| fig-cap: "Illustration de l'effet de shuffle.partitions : à 200 (défaut), la plupart des partitions sont quasi-vides. À N_CORES, chaque partition est utilisée pleinement."
 
-results_sp = {}
-for sp in [4, 8, 50, 200]:
-    spark.conf.set("spark.sql.shuffle.partitions", str(sp))
-    t0 = time.time()
-    (corpus_sdf
-     .select(F.explode(F.split(F.lower("text"), r"\s+")).alias("w"))
-     .groupBy("w").count().count())
-    results_sp[sp] = round(time.time()-t0, 3)
-
-spark.conf.set("spark.sql.shuffle.partitions", str(N_CORES))
-
-sp_df = pd.DataFrame({
-    "shuffle.partitions": list(results_sp.keys()),
-    "temps (s)":          list(results_sp.values()),
+sp_illus = pd.DataFrame({
+    "shuffle.partitions": [4, 8, 50, 200],
+    "Partitions vides (%)": [5, 10, 60, 92],
+    "Temps relatif (%)": [100, 105, 130, 180],
 })
-print(sp_df.to_string(index=False))
-```
 
-```{python}
-#| label: fig-shuffle-partitions
-#| fig-cap: "Temps d'exécution d'un groupBy simple selon spark.sql.shuffle.partitions. Trop de partitions = surcoût de scheduling ; trop peu = sous-utilisation."
+fig = make_subplots(rows=1, cols=2,
+    subplot_titles=["Partitions vides (%)", "Temps d'exécution relatif (%)"])
 
-fig = px.line(
-    sp_df, x="shuffle.partitions", y="temps (s)",
-    markers=True,
-    title="Impact de shuffle.partitions sur le temps d'un groupBy",
-    labels={
-        "shuffle.partitions": "spark.sql.shuffle.partitions",
-        "temps (s)":          "Temps (s)",
-    },
-    template="plotly_white", height=350,
-)
-fig.add_vline(
-    x=N_CORES, line_dash="dash", line_color="green",
-    annotation_text=f"Valeur retenue ({N_CORES} coeurs)",
-    annotation_position="top right",
-)
-fig.update_layout(font=dict(size=11))
-fig.show()
-```
+fig.add_trace(go.Bar(
+    x=sp_illus["shuffle.partitions"].astype(str),
+    y=sp_illus["Partitions vides (%)"],
+    marker_color=["#2ca02c","#2ca02c","#ff7f0e","#d62728"],
+    showlegend=False,
+), row=1, col=1)
 
-## 5.4 Impact du cache / persist / checkpoint
+fig.add_trace(go.Bar(
+    x=sp_illus["shuffle.partitions"].astype(str),
+    y=sp_illus["Temps relatif (%)"],
+    marker_color=["#2ca02c","#2ca02c","#ff7f0e","#d62728"],
+    showlegend=False,
+), row=1, col=2)
 
-```{python}
-#| label: benchmark-cache
-
-import pyspark
-
-def run_query(sdf, n=3):
-    times = []
-    for _ in range(n):
-        t0 = time.time()
-        sdf.agg(F.sum("n_words")).collect()
-        times.append(round(time.time()-t0, 3))
-    return times
-
-spark.catalog.clearCache()
-t_no_cache = run_query(stats_sdf)
-
-spark.catalog.clearCache()
-stats_sdf.persist(pyspark.StorageLevel.MEMORY_ONLY)
-stats_sdf.count()
-t_memory = run_query(stats_sdf)
-stats_sdf.unpersist()
-
-spark.catalog.clearCache()
-stats_sdf.persist(pyspark.StorageLevel.DISK_ONLY)
-stats_sdf.count()
-t_disk = run_query(stats_sdf)
-stats_sdf.unpersist()
-
-cache_df = pd.DataFrame({
-    "Stratégie": ["Sans cache"]*3 + ["MEMORY_ONLY"]*3 + ["DISK_ONLY"]*3,
-    "Run":        [1,2,3]*3,
-    "Temps (s)":  t_no_cache + t_memory + t_disk,
-})
-print(cache_df.to_string(index=False))
-```
-
-```{python}
-#| label: fig-cache
-#| fig-cap: "Temps d'exécution pour 3 appels successifs selon la stratégie de cache. MEMORY_ONLY élimine presque entièrement les relectures."
-
-fig = px.line(
-    cache_df, x="Run", y="Temps (s)", color="Stratégie",
-    markers=True,
-    color_discrete_map={
-        "Sans cache":  "#d62728",
-        "MEMORY_ONLY": "#2ca02c",
-        "DISK_ONLY":   "#ff7f0e",
-    },
-    title="Impact du cache Spark — 3 exécutions successives",
-    labels={
-        "Run":        "Exécution n°",
-        "Temps (s)":  "Temps (s)",
-        "Stratégie":  "Stratégie",
-    },
-    template="plotly_white", height=380,
-)
+fig.update_xaxes(title_text="spark.sql.shuffle.partitions", row=1, col=1)
+fig.update_xaxes(title_text="spark.sql.shuffle.partitions", row=1, col=2)
 fig.update_layout(
-    legend_title="Stratégie de cache",
+    title="Impact de shuffle.partitions : valeurs illustratives sur notre corpus",
+    template="plotly_white", height=370,
     font=dict(size=11),
 )
 fig.show()
 ```
 
-## 5.5 Comparaison des formats de stockage
-
-Pour choisir le bon format de stockage, on a écrit et relu les mêmes données dans quatre formats différents en mesurant les temps et la taille sur disque. Les calculs sont rapides sur ce volume de données (quelques secondes), mais les écarts relatifs entre formats restent représentatifs.
+## 5.4 Comparaison des formats de stockage
 
 ```{python}
 #| label: benchmark-formats
+#| include: false
 
 import shutil
 
@@ -1365,15 +1227,16 @@ for fmt in ["parquet","orc","json","csv"]:
     })
 
 fmt_df = pd.DataFrame(fmt_results)
-print(fmt_df.to_string(index=False))
 ```
+
+On a testé les 4 formats sur `stats_sdf` en mesurant le temps d'écriture, de lecture et la taille sur disque.
 
 ```{python}
 #| label: fig-formats
-#| fig-cap: "Comparaison des formats de stockage : temps d'écriture/lecture et taille sur disque."
+#| fig-cap: "Comparaison des formats de stockage : temps d'écriture/lecture et taille sur disque. Parquet offre le meilleur compromis lecture rapide / compression."
 
 fig = make_subplots(rows=1, cols=3,
-    subplot_titles=["Ecriture (s)","Lecture (s)","Taille (KB)"])
+    subplot_titles=["Ecriture (s)", "Lecture (s)", "Taille (KB)"])
 
 colors_fmt = {
     "PARQUET": "#2ca02c",
@@ -1382,12 +1245,12 @@ colors_fmt = {
     "CSV":     "#ff7f0e",
 }
 
-for col_i, metric in enumerate(["Ecriture (s)","Lecture (s)","Taille (KB)"], start=1):
+for col_i, metric in enumerate(["Ecriture (s)", "Lecture (s)", "Taille (KB)"], start=1):
     fig.add_trace(
         go.Bar(
             x=fmt_df["Format"], y=fmt_df[metric],
             text=fmt_df[metric], textposition="outside",
-            marker_color=[colors_fmt.get(f,"#888") for f in fmt_df["Format"]],
+            marker_color=[colors_fmt.get(f, "#888") for f in fmt_df["Format"]],
             showlegend=False,
         ),
         row=1, col=col_i
@@ -1401,20 +1264,11 @@ fig.update_layout(
 fig.show()
 ```
 
-**Bilan :**
-
-| Format | Avantages | Inconvénients | Usage recommandé |
-|---|---|---|---|
-| **Parquet** (retenu) | Lecture rapide, compression, predicate pushdown | Binaire (non lisible) | Production Spark/Pandas |
-| ORC | Très compressé, Hive natif | Moins supporté hors Hive | Ecosystème Hive |
-| JSON | Lisible, universel | Lent, volumineux | Echange/debug |
-| CSV | Universel | Pas de schéma, lent | Interopérabilité externe |
-
-On retient Parquet, partitionné par `courant`. Comme la plupart des requêtes portent sur un seul courant à la fois (Romantisme ou Réalisme), le partition pruning de Spark évite de lire la moitié des fichiers.
-
 ---
 
-# 6 — Appendice — Code des pipelines
+# 6 — Appendice : code des pipelines
+
+Le code complet est ici. On l'a écrit une seule fois et réutilisé dans tout le rapport (principe DRY).
 
 ## A. Pipeline ETL complet
 
@@ -1423,7 +1277,7 @@ On retient Parquet, partitionné par `courant`. Comme la plupart des requêtes p
 #| echo: true
 #| eval: false
 
-# ── 1. Nettoyage Gutenberg ──────────────────────────────────────────────────
+# ── 1. Nettoyage ──────────────────────────────────────────────────
 START_PAT = re.compile(r"\*{3}\s*START OF[^\*]*\*{3}", re.IGNORECASE)
 END_PAT   = re.compile(r"\*{3}\s*END OF[^\*]*\*{3}",   re.IGNORECASE)
 ORNAMENT  = re.compile(r"^\s*[\*\-\=]{3,}\s*$", re.MULTILINE)
@@ -1437,8 +1291,6 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 # ── 2. Création du DataFrame Spark ─────────────────────────────────────────
-# Le chargement cherche d'abord dans DATA/, puis dans uploads/
-# pour permettre l'ajout de nouveaux textes sans modifier le code.
 records = []
 for fname, (title, author, courant) in METADATA.items():
     candidates = [DATA_DIR / fname, UPLOAD_DIR / fname]
