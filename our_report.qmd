@@ -481,41 +481,7 @@ fig.update_layout(
 fig.show()
 ```
 
-## 2.2 Richesse lexicale — Type-Token Ratio et longueur moyenne des mots
-
-Le **Type-Token Ratio (TTR)** mesure simplement à quel point un auteur varie son vocabulaire : on divise le nombre de mots différents par le nombre total de mots. Plus c'est élevé, moins il se répète.
-
-```{python}
-#| label: fig-ttr
-#| fig-cap: "TTR et longueur moyenne des mots par auteur. Un TTR élevé indique un vocabulaire riche ; une longueur moyenne élevée suggère un style soutenu."
-
-fig = px.scatter(
-    read_pd,
-    x="ttr", y="avg_word_len",
-    color="courant", symbol="author",
-    text="author",
-    size="n_words",
-    color_discrete_map=COLOR_COURANT,
-    title="Richesse lexicale : TTR vs longueur moyenne des mots",
-    labels={
-        "ttr":          "Type-Token Ratio",
-        "avg_word_len": "Longueur moyenne des mots (car.)",
-        "courant":      "Courant",
-        "author":       "Auteur",
-        "n_words":      "Nb de mots",
-    },
-    template="plotly_white",
-    height=500,
-)
-fig.update_traces(textposition="top center", marker_line_width=1)
-fig.update_layout(
-    legend_title="Courant / Auteur",
-    font=dict(size=11),
-)
-fig.show()
-```
-
-## 2.3 Segmentation dialogue / narration
+## 2.2 Segmentation dialogue / narration
 
 On a essayé de distinguer les dialogues du reste dans chaque texte. La règle qu'on a choisie est assez simple : une ligne qui commence par un tiret (—) ou des guillemets est du dialogue, tout le reste c'est de la narration. C'est une approximation, mais ça marche raisonnablement bien sur des textes du XIXe siècle.
 
@@ -1233,7 +1199,7 @@ On a testé les 4 formats sur `stats_sdf` en mesurant le temps d'écriture, de l
 
 ```{python}
 #| label: fig-formats
-#| fig-cap: "Comparaison des formats de stockage : temps d'écriture/lecture et taille sur disque. Parquet offre le meilleur compromis lecture rapide / compression."
+#| fig-cap: "Comparaison des formats de stockage : temps d'écriture/lecture et taille sur disque. CSV offre le meilleur compromis lecture rapide / compression. Dans notre cas, ce n'est pas un résultat universel mais une observation dépendante de la structure des données, il aurait fallu rajouter les textes dans notre dataframe pour que cela soit plus représentatif"
 
 fig = make_subplots(rows=1, cols=3,
     subplot_titles=["Ecriture (s)", "Lecture (s)", "Taille (KB)"])
