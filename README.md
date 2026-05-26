@@ -12,7 +12,7 @@ A noter : il est tout à fait possible de consulter le fichier html sans devoir 
 
 Les dépendances Python sont listées dans le fichier requirements.txt. Pour créer l’environnement Python pyenv ainsi que son kernel, il faut suivre les étapes ci-dessous.
 
-- python -m venv pyenv  (ou python3 -m venv pyenv)
+- python3.12 -m venv pyenv
 - source pyenv/bin/activate
 - pip install -r requirements.txt
 - python -m ipykernel install --user --name=pyenv --display-name "Local Python (pyenv)"
@@ -22,8 +22,7 @@ Il sera ensuite possible de lancer le projet
 
 ## Comment compiler le rapport?
 
-Sans Rstudio, sur un terminal, exécutez la ligne suivante dans l'environnement.
-
+Sans Rstudio, sur un terminal, exécutez la ligne suivante dans l'environnement. 
 ```
 quarto render our_report.qmd
 # Output : _outdir/our_report.html
